@@ -28,13 +28,22 @@ class Run:
     # -- lifecycle ---------------------------------------------------------------------------------------------------
     @classmethod
     def create(cls, backend="sim", seed=0, truth=None, camera=None):
-        RUNS_DIR.mkdir(exist_ok=True)
-        rid = datetime.now().strftime("%Y%m%d-%H%M%S")
-        d = RUNS_DIR / rid
-        (d / "frames").mkdir(parents=True)
+        # Build the backend first: a refused/failed backend must not leave a run directory behind.
         inst = get_backend(backend, None, seed, camera)
         if truth:
             inst.s.update(truth)
+        RUNS_DIR.mkdir(exist_ok=True)       # the only place this code creates directories: inside runs/
+        base = datetime.now().strftime("%Y%m%d-%H%M%S")
+        rid, n = base, 0
+        while True:                         # atomic claim; two runs in the same second get -1, -2, ...
+            d = RUNS_DIR / rid
+            try:
+                d.mkdir()
+                break
+            except FileExistsError:
+                n += 1
+                rid = f"{base}-{n}"
+        (d / "frames").mkdir()
         (d / "state.json").write_text(json.dumps({"backend": backend, "inst": inst.get_state(), "calibration": {},
                                                   "last_fit": None, "n_frames": 0, "status": "running"}))
         (RUNS_DIR / "CURRENT").write_text(rid)

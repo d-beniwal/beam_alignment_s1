@@ -11,7 +11,7 @@ QA figures: `analysis/geometry_*.png` (regenerate with `python -I scripts/make_g
 
 ## Next steps
 
-0. **Stage-1 target (2026-10-27): move the pin so its measured axis stays fixed in the image under rotation (eccentricity -> 0), then axis column = beam centre (959.5 on test screenshot).** Plan: fit pin x(omega)=c+a*cos+b*sin at several omega (c = axis, (a,b) = offset in the rotating frame); cancel (a,b) with the two horizontal translations that ride ON the rotation stage. samE.x/z move the pin (axis is fixed by the base). Remaining blockers: base motors for moving the axis (unknown), and the sign checks (ROT_SIGN, IMAGE_COL_PER_X).
+0. **Stage-1 target (2026-10-27): move the pin so its measured axis stays fixed in the image under rotation (eccentricity -> 0), then axis column = beam centre (959.5 on test screenshot).** Plan: fit pin x(omega)=c+a*cos+b*sin at several omega (c = axis, (a,b) = offset in the rotating frame); cancel (a,b) with the two horizontal translations that ride ON the rotation stage. samE.x/z move the pin (axis is fixed by the base). Remaining blockers: base motor for moving the axis (aerox unconfirmed; sign unknown). IMAGE_COL_PER_X=-1 and ROT_SIGN=+1 confirmed by the user 2026-10-28 (hardware test move still pending).
 1. Beam-order model of B/C/E hutches + all slits recorded in DOMAIN.md
    (2026-10-26, from screenshots). Still need: distances, IC↔PV mapping,
    alignment sequence, what "aligned" means.

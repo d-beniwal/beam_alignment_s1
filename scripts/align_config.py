@@ -3,9 +3,12 @@
 # Tomo detector pixel size (um/pixel). Confirmed by the user 2026-10-27 (1 um/px).
 PIXEL_UM = 1.0
 
-# Sign links - UNVERIFIED, to be confirmed with a small user-approved test move.
-IMAGE_COL_PER_X = -1   # +samE.x moves the pin image LEFT, i.e. its column decreases (user, 2026-10-27)
-ROT_SIGN = +1          # k: sign of the b (sin w) change per +samE.z move; wrong value is caught by axis_align.run()
+# Sign links. Both confirmed by the user 2026-10-28 (not yet verified by a hardware test move; `calibrate` still measures them at run time).
+IMAGE_COL_PER_X = -1   # +samE.x moves the pin image LEFT, i.e. its column decreases (user, confirmed 2026-10-28)
+# k: sign of the b (sin w) change per +samE.z move. Derived from: stage is left-handed (+omega = clockwise seen from the top), x = left looking
+# downstream, y up, z downstream. Clockwise = rotation by -omega about +y, so x' = x cos w - z sin w, col = c - x' => a = -x_p, b = +z_p => k = +1.
+# (A counter-clockwise +omega would give k = -1.) A wrong value is caught by axis_align.run() / `calibrate`.
+ROT_SIGN = +1
 
 
 def px_to_mm(px, pixel_um=None):

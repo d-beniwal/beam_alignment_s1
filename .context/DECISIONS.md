@@ -6,6 +6,13 @@ Add new decisions at the top using:
 
 What was decided and why.
 
+## 2026-10-28 — Sign constants confirmed by the user: IMAGE_COL_PER_X=-1, ROT_SIGN=+1
+
+User confirmed IMAGE_COL_PER_X = -1 and stated the Sector 1 stage is left-handed (+omega = clockwise seen from the top). Derivation: lab x = left, y = up, z = downstream
+(right-handed); clockwise = rotation by -omega about +y, x' = x cos w - z sin w, image col = c - x' => a = -x_p, b = +z_p, so +z changes b by +1 per unit: ROT_SIGN = +1
+(unchanged value; comment in `scripts/align_config.py` now records the derivation). Still not hardware-verified: `calibrate` measures both at run time; the base motor
+(`aerox`) sign and identity remain open.
+
 ## 2026-10-28 — .gitignore: only the alignment software is tracked (user)
 
 Ignored: `s1_data/`, `analysis/`, `runs/`, `scratch/`, caches, and the exploration/analysis scripts (h5_tree, make_*_figures, pin_segment, test_segmentation,

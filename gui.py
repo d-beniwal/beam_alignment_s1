@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 """Start the alignment GUI: python -I gui.py [--port 8765]. Read-only viewer of runs/*/events.jsonl."""
 import sys
+sys.dont_write_bytecode = True   # no __pycache__ dirs outside runs/
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import balign  # noqa: E402,F401
