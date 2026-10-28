@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Beam alignment monitor</title>
+<style>
+:root{--bg:#f4f5f8;--panel:#fff;--ink:#1b2330;--mute:#677386;--line:#dde2ea;--ok:#168a4a;--okbg:#e4f5ea;--bad:#c0352b;--badbg:#fbe9e7;--warn:#a96a08;--warnbg:#fdf1dc;--acc:#2160c4;--agent:#6b3fa0;--agentbg:#f0e9f8;--mono:ui-monospace,Menlo,Consolas,monospace}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#11151b;--panel:#1a2029;--ink:#e5eaf1;--mute:#8d99aa;--line:#2b3441;--ok:#4cc380;--okbg:#17301f;--bad:#ff7064;--badbg:#3a1d1a;--warn:#e3a549;--warnbg:#38290f;--acc:#6ea4ff;--agent:#b994f2;--agentbg:#2a2038}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,sans-serif}
+.wrap{max-width:1400px;margin:0 auto;padding:12px 16px;display:grid;gap:12px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;min-width:0}
+h2{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--mute);margin:0 0 8px;font-weight:700}
+.top{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center}
+.top h1{font-size:17px;margin:0 6px 0 0}
+.pill{padding:2px 10px;border-radius:99px;border:1px solid var(--line);font:12px var(--mono);white-space:nowrap}
+.pill.run{background:var(--warnbg);color:var(--warn);border-color:transparent}.pill.ok{background:var(--okbg);color:var(--ok);border-color:transparent}.pill.failed{background:var(--badbg);color:var(--bad);border-color:transparent}
+.sp{flex:1}
+/* stepper */
+.steps{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}
+.step{padding:8px 10px;border-radius:8px;border:1px solid var(--line);color:var(--mute);font-size:12.5px;position:relative}
+.step b{display:block;font-size:11px;letter-spacing:.05em;text-transform:uppercase}
+.step.done{color:var(--ok);background:var(--okbg);border-color:transparent}.step.done b::before{content:"✓ "}
+.step.now{color:var(--acc);border-color:var(--acc);box-shadow:0 0 0 2px color-mix(in srgb,var(--acc) 25%,transparent);font-weight:600}
+.step.skip{opacity:.5}
+@media(max-width:900px){.steps{grid-template-columns:repeat(2,1fr)}}
+/* hero */
+.hero{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,2fr);gap:12px}
+@media(max-width:1000px){.hero{grid-template-columns:1fr}}
+.say{background:var(--agentbg);border-color:transparent}.say h2{color:var(--agent)}
+.say .txt{font-size:15px;line-height:1.5}.say .meta{margin-top:8px;font:12px var(--mono);color:var(--mute)}
+.tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+@media(max-width:700px){.tiles{grid-template-columns:1fr}}
+.tile{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--panel)}
+.tile.ok{background:var(--okbg);border-color:transparent}.tile.bad{background:var(--badbg);border-color:transparent}.tile.na{opacity:.7}
+.tile .hd{display:flex;justify-content:space-between;align-items:baseline;gap:8px}.tile .nm{font-size:13px;font-weight:600}.tile .ds{font-size:11.5px;color:var(--mute);margin-bottom:4px}
+.tile .val{font:700 28px var(--mono);line-height:1.1}.tile.ok .val{color:var(--ok)}.tile.bad .val{color:var(--bad)}
+.tile .sub{font:12px var(--mono);color:var(--mute);margin-top:2px}.tile .verdict{font-size:12px;font-weight:700;white-space:nowrap}
+.tile.ok .verdict{color:var(--ok)}.tile.bad .verdict{color:var(--bad)}
+.tile svg{width:100%;height:34px;margin-top:4px}
+.stale{background:var(--warnbg);color:var(--warn);border-radius:6px;padding:4px 10px;font-size:12.5px}
+/* main visuals */
+.vis{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
+@media(max-width:1000px){.vis{grid-template-columns:1fr}}
+.tabs{display:flex;gap:6px;margin-bottom:8px}.tabs button{font:12px system-ui;padding:3px 10px;border-radius:99px;border:1px solid var(--line);background:none;color:var(--mute);cursor:pointer}
+.tabs button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+#cam,#live{width:100%;display:block;border-radius:6px;background:#000;min-height:80px}
+.cap{font:12px var(--mono);color:var(--mute);margin-top:6px}
+.legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--mute);margin-top:6px}.legend i{display:inline-block;width:14px;height:3px;vertical-align:middle;margin-right:5px;border-radius:2px}
+.plain{font-size:13px;color:var(--mute);margin-top:6px}.plain b{color:var(--ink)}
+svg text{fill:var(--mute);font:11px var(--mono)}
+/* actions + log */
+.two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}@media(max-width:1000px){.two{grid-template-columns:1fr}}
+table{border-collapse:collapse;width:100%;font:12.5px var(--mono)}th,td{padding:4px 6px;text-align:right;border-bottom:1px solid var(--line)}th{color:var(--mute);font-weight:600}td.l,th.l{text-align:left}
+tr.test td{color:var(--mute)}tr.real td:first-child{font-weight:700}
+.notes{max-height:260px;overflow:auto}.note{padding:6px 0;border-bottom:1px dashed var(--line)}.note .t{font:11px var(--mono);color:var(--mute)}
+details summary{cursor:pointer;color:var(--mute);font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+#log{max-height:300px;overflow:auto;font:12px/1.5 var(--mono);margin-top:8px}#log div{padding:1px 0;border-bottom:1px dashed var(--line)}#log .t{color:var(--mute)}
+.k-move{color:var(--warn)}.k-note{color:var(--agent)}.k-warning,.k-error{color:var(--bad)}.k-sweep_fit,.k-calibration{color:var(--acc)}
+</style></head><body><div class="wrap">
+
+<div class="card top">
+ <h1>Beam alignment</h1><span class="pill" id="run">no run</span><span class="pill" id="status">–</span>
+ <span class="sp"></span>
+ <span class="pill" id="pos" title="current stage positions">–</span><span class="pill" id="cnt"></span><span class="pill" id="pix"></span><span class="pill" id="sim">simulated backend</span>
+</div>
+
+<div class="card"><h2>Progress</h2><div class="steps" id="steps"></div></div>
+
+<div class="hero">
+ <div class="card say"><h2>Agent says</h2><div class="txt" id="say">Waiting for the agent to start…</div><div class="meta" id="saymeta"></div></div>
+ <div style="display:grid;gap:8px">
+  <div class="tiles" id="tiles"></div>
+  <div class="stale" id="stale" style="display:none"></div>
+ </div>
+</div>
+
+<div class="vis">
+ <div class="card"><h2>Tomo camera</h2>
+  <div class="tabs"><button id="tabM" class="on">Last measurement</button><button id="tabL">Live view</button></div>
+  <img id="cam" alt="" style="display:none"><img id="live" alt="" style="display:none">
+  <div class="cap" id="camcap">no frame yet</div>
+  <div class="legend" id="legend"><span><i style="background:#ffc800"></i>pin sides</span><span><i style="background:#ff5050"></i>pin top edge / axis column</span><span><i style="background:#50c878"></i>beam footprint &amp; centre</span></div>
+ </div>
+ <div class="card"><h2>Pin position while rotating</h2><svg id="plot" viewBox="0 0 640 310" width="100%"></svg>
+  <div class="plain" id="plain"></div></div>
+</div>
+
+<div class="two">
+ <div class="card"><h2>Stage moves</h2><table id="moves"><thead><tr><th class="l">motor</th><th>Δ mm</th><th>now at</th><th class="l">why</th></tr></thead><tbody></tbody></table>
+  <div class="cap" id="movesnote"></div></div>
+ <div class="card"><h2>Agent notes</h2><div class="notes" id="notes"></div></div>
+</div>
+
+<div class="card"><details><summary>Technical log (every event)</summary><div id="log"></div></details></div>
+
+</div>
+<script>
+const $=id=>document.getElementById(id);
+let since=0,run=null,cfg={},S;
+const STEPS=[["locate","1 · Find pin"],["fit","2 · Measure axis"],["cal","3 · Calibrate motors"],["pin","4 · Pin onto axis"],["base","5 · Axis onto beam"],["verify","6 · Verify"]];
+function reset(){S={sweeps:[],beam:null,moves:[],notes:[],ev:0,phase:{locate:0,fit:0,cal:0,pin:0,base:0,verify:0},finished:null,lastEv:null,movesAfterFit:0,frames:0,lastNote:null,started:null,calActive:false};
+ ['moves','notes','log'].forEach(k=>{const e=$(k);(e.tBodies?e.tBodies[0]:e).innerHTML=''});}
+reset();
+const f=(v,n=2)=>v==null||isNaN(v)?'–':(+v).toFixed(n),sg=(v,n=2)=>v==null?'–':((v>=0?'+':'−')+Math.abs(v).toFixed(n));
+const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+async function j(u){return (await fetch(u)).json()}
+
+function ingest(e){
+ const d=e.data||{};S.ev++;S.lastEv=e;if(!S.started)S.started=e.t;
+ if(e.image){S.frames++;$('cam').style.display='block';$('cam').src=`/runs/${run}/${e.image}?t=${e.i}`;$('camcap').textContent=e.msg;S.cap=e.msg}
+ if(e.kind==='measure')S.phase.locate=1;
+ if(e.kind==='note'&&d.agent===false&&/calibrat/i.test(e.msg))S.calActive=true;
+ if(e.kind==='sweep_fit'&&d.fit){const cal=(d.tag||'').startsWith('cal');
+   if(!cal){S.sweeps.push(d);S.beam=d.beam_cx;S.phase.fit=1;S.movesAfterFit=0;if(S.phase.pin&&S.phase.base)S.phase.verify=1}}
+ if(e.kind==='calibration')S.phase.cal=1;
+ if(e.kind==='move'){const test=/calibration test|undo calibration/i.test(d.reason||'');
+   S.moves.push({d,test});
+   if(!test){S.movesAfterFit++;if(d.motor==='aerox')S.phase.base=1;else if(d.motor==='x'||d.motor==='z')S.phase.pin=1}
+   const r=document.createElement('tr');r.className=test?'test':'real';
+   r.innerHTML=`<td class="l">${d.motor}</td><td>${sg(d.mm,4)}</td><td>${f(d.after[d.motor],4)}</td><td class="l">${esc(d.reason||'')}</td>`;$('moves').tBodies[0].appendChild(r)}
+ if(e.kind==='note'&&d.agent!==false){S.lastNote=e;const n=document.createElement('div');n.className='note';n.innerHTML=`<div class="t">${e.t.slice(11,19)}</div>${esc(e.msg)}`;
+   const nb=$('notes');const stick=nb.scrollTop+nb.clientHeight>=nb.scrollHeight-30;nb.appendChild(n);if(stick)nb.scrollTop=nb.scrollHeight}
+ if(e.kind==='run_finished')S.finished=d;
+ const dv=document.createElement('div');const ag=e.kind==='note'&&d.agent!==false;
+ dv.innerHTML=`<span class="t">${e.t.slice(11,19)}</span> <span class="k-${ag?'note':e.kind}">[${ag?'agent':e.kind}]</span> `;dv.appendChild(document.createTextNode(e.msg));
+ const lg=$('log');const st=lg.scrollTop+lg.clientHeight>=lg.scrollHeight-30;lg.appendChild(dv);if(st)lg.scrollTop=lg.scrollHeight;
+}
+
+function spark(vals,tol,color){ // |value| history with the tolerance band
+ if(vals.length<1)return'';const W=200,H=34,m=3,mx=Math.max(...vals.map(Math.abs),tol*2,1e-9);
+ const X=i=>m+(vals.length===1?0:i/(vals.length-1))*(W-2*m),Y=v=>H-m-Math.min(Math.abs(v),mx)/mx*(H-2*m);
+ const pts=vals.map((v,i)=>`${X(i)},${Y(v)}`).join(' ');
+ return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><rect x="0" y="${Y(tol)}" width="${W}" height="${H-Y(tol)}" fill="var(--ok)" opacity=".18"/><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.8"/>${vals.map((v,i)=>`<circle cx="${X(i)}" cy="${Y(v)}" r="2.6" fill="${color}"/>`).join('')}</svg>`;
+}
+function tile(name,desc,series,tol,unitNote){
+ if(!series.length)return `<div class="tile na"><div class="nm">${name}</div><div class="ds">${desc}</div><div class="val">–</div><div class="sub">not measured yet</div></div>`;
+ const v=series[series.length-1],ok=Math.abs(v)<tol,s0=series[0];
+ return `<div class="tile ${ok?'ok':'bad'}"><div class="hd"><span class="nm">${name}</span><span class="verdict">${ok?'✓ OK':'✗ off'}</span></div><div class="ds">${desc}</div>
+  <div class="val">${sg(v,2)} px</div><div class="sub">${f(v*cfg.pixel_um,1)} µm · target 0 ± ${tol}${series.length>1?` · start ${sg(s0,1)}`:''}</div>${spark(series,tol,ok?'var(--ok)':'var(--bad)')}</div>`;
+}
+
+function plot(){
+ const svg=$('plot'),W=640,H=310,m={l:46,r:12,t:12,b:40};
+ if(!S.sweeps.length){svg.innerHTML='';$('plain').innerHTML='Waiting for the first sweep…';return}
+ const all=S.sweeps.flatMap(s=>s.cols).concat(S.beam!=null?[S.beam-25,S.beam+25]:[]);
+ let lo=Math.min(...all),hi=Math.max(...all);const pad=(hi-lo)*.08+5;lo-=pad;hi+=pad;
+ const X=w=>m.l+(w+100)/200*(W-m.l-m.r),Y=v=>H-m.b-(v-lo)/(hi-lo)*(H-m.t-m.b);
+ let s='';for(let w=-90;w<=90;w+=30)s+=`<line x1="${X(w)}" x2="${X(w)}" y1="${m.t}" y2="${H-m.b}" stroke="var(--line)"/><text x="${X(w)-9}" y="${H-m.b+15}">${w}°</text>`;
+ for(let k=0;k<=4;k++){const v=lo+(hi-lo)*k/4;s+=`<line x1="${m.l}" x2="${W-m.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)"/><text x="2" y="${Y(v)+4}">${v.toFixed(0)}</text>`}
+ s+=`<text x="${m.l}" y="${m.t+8}" style="fill:var(--mute)">pin column (px) ↑</text><text x="${W-m.r-118}" y="${H-5}">rotation angle ω →</text>`;
+ if(S.beam!=null)s+=`<rect x="${m.l}" y="${Y(S.beam+cfg.tol_c_px)}" width="${W-m.l-m.r}" height="${Math.max(2,Y(S.beam-cfg.tol_c_px)-Y(S.beam+cfg.tol_c_px))}" fill="var(--ok)" opacity=".25"/><line x1="${m.l}" x2="${W-m.r}" y1="${Y(S.beam)}" y2="${Y(S.beam)}" stroke="var(--ok)" stroke-width="1.5"/><text x="${W-m.r-92}" y="${Y(S.beam)-5}" style="fill:var(--ok)">beam centre</text>`;
+ S.sweeps.forEach((sw,i)=>{const last=i===S.sweeps.length-1,op=last?1:.22;
+  if(sw.fit.ok){let d='';for(let w=-95;w<=95;w+=2){const v=sw.fit.c+sw.fit.a*Math.cos(w*Math.PI/180)+sw.fit.b*Math.sin(w*Math.PI/180);d+=(d?'L':'M')+X(w)+' '+Y(v)}
+   s+=`<path d="${d}" fill="none" stroke="var(--acc)" stroke-width="${last?2:1}" opacity="${op}"/>`;
+   if(last)s+=`<line x1="${m.l}" x2="${W-m.r}" y1="${Y(sw.fit.c)}" y2="${Y(sw.fit.c)}" stroke="var(--acc)" stroke-dasharray="5 4"/><text x="${m.l+6}" y="${Y(sw.fit.c)-5}" style="fill:var(--acc)">rotation axis c = ${sw.fit.c.toFixed(1)}</text>`}
+  sw.omegas.forEach((w,k)=>{s+=`<circle cx="${X(w)}" cy="${Y(sw.cols[k])}" r="${last?3.6:2}" fill="var(--warn)" opacity="${op}"/>`})});
+ svg.innerHTML=s;
+ const L=S.sweeps[S.sweeps.length-1];
+ $('plain').innerHTML=`<b>Dots</b> = where the pin was measured at each angle; <b>blue curve</b> = fitted sine (older sweeps faded). A perfectly centred pin would sit on the <b>dashed blue line</b> at every angle (flat curve). The <b>dashed line</b> is the rotation axis; the <b>green band</b> is the beam centre. Goal: flat curve, dashed line inside the green band.`
+}
+
+function render(){
+ const L=S.sweeps[S.sweeps.length-1],tolAB=cfg.tol_ab_px,tolC=cfg.tol_c_px;
+ // steps
+ const ab=L&&L.fit.ok&&L.within_tol.a&&L.within_tol.b&&S.movesAfterFit===0; // pin confirmed on the axis by a sweep taken after the last move
+ const cur=S.finished?'done':S.phase.base?'verify':ab?'base':(S.phase.pin||S.phase.cal)?'pin':S.phase.fit?'cal':S.phase.locate?'fit':'locate';
+ const order=STEPS.map(x=>x[0]);let seen=true;
+ $('steps').innerHTML=STEPS.map(([k,lab])=>{let c='';const idx=order.indexOf(k),ci=cur==='done'?99:order.indexOf(cur);
+  if(idx<ci)c='done';else if(idx===ci)c='now';
+  if(k==='cal'&&!S.phase.cal&&ci>idx)c='skip';
+  const [num,txt]=lab.split(' · ');return `<div class="step ${c}"><b>Step ${num}</b>${txt}</div>`}).join('');
+ // agent says
+ if(S.lastNote){$('say').textContent=S.lastNote.msg;$('saymeta').textContent=S.lastNote.t.slice(11,19)+' · last agent note'}
+ else if(S.lastEv){$('say').textContent=S.lastEv.msg;$('saymeta').textContent='no agent notes yet · latest event'}
+ // tiles
+ const A=S.sweeps.map(s=>s.fit.ok?s.fit.a:null).filter(v=>v!=null),B=S.sweeps.map(s=>s.fit.ok?s.fit.b:null).filter(v=>v!=null),C=S.sweeps.map(s=>s.fit.ok?s.within_tol.c_minus_beam_px:null).filter(v=>v!=null);
+ $('tiles').innerHTML=tile('Pin sideways offset (a)','How far the pin sits off the rotation axis, across the image. Fixed with stage x.',A,tolAB)
+  +tile('Pin offset along beam (b)','How far the pin sits off the axis, along the beam. Fixed with stage z.',B,tolAB)
+  +tile('Axis vs beam centre (c − beam)','Is the rotation axis on the beam centre? Fixed by moving the base (aerox).',C,tolC);
+ const st=$('stale');if(S.movesAfterFit>0&&L){st.style.display='block';st.textContent=`⚠ ${S.movesAfterFit} stage move(s) happened after the last fit — the numbers above are from before that move. A new sweep will update them.`}else st.style.display='none';
+ plot();
+}
+
+async function tick(){
+ try{cfg=await j('/api/config');$('pix').textContent=`${cfg.pixel_um} µm/px`;
+  if(cfg.latest&&cfg.latest!==run){run=cfg.latest;since=0;reset()}
+  if(run){const r=await j(`/api/events?run=${run}&since=${since}`);
+   r.events.forEach(ingest);since+=r.events.length;const state=r.state;
+   $('run').textContent=run;
+   if(state){const b=$('status');b.textContent=state.status;b.className='pill '+(state.status==='running'?'run':state.status==='ok'?'ok':'failed');
+    const p=state.inst&&state.inst.pos?state.inst.pos:{};$('pos').textContent=`ω ${f(state.inst.omega,1)}° · x ${f(p.x,3)} · z ${f(p.z,3)} · aerox ${f(p.aerox,3)} mm`;
+    $('sim').textContent=state.backend==='sim'?'simulated backend':'REAL INSTRUMENT'}
+   $('cnt').textContent=`${S.frames} frames · ${S.moves.filter(m=>!m.test).length} moves`;
+   const nm=S.moves.filter(m=>m.test).length;$('movesnote').textContent=nm?`Grey rows are small calibration test moves (each undone right after).`:'';
+   if(r.events.length||!S.rendered){render();S.rendered=1}
+   const li=$('live');li.onload=()=>{li.dataset.ok=1;if(S.tab==='L'){li.style.display='block'}};li.onerror=()=>{li.dataset.ok=0};li.src=`/runs/${run}/live.jpg?t=${Date.now()}`}
+ }catch(e){}
+ setTimeout(tick,1000)}
+function tab(t){S.tab=t;$('tabM').className=t==='M'?'on':'';$('tabL').className=t==='L'?'on':'';
+ $('cam').style.display=t==='M'&&$('cam').src?'block':'none';$('live').style.display=t==='L'?'block':'none';
+ $('legend').style.display=t==='M'?'flex':'none';$('camcap').textContent=t==='L'?(+$('live').dataset.ok?'live frame (read-only feed, ~1 Hz)':'no live feed running (start: python -I align.py live-feed)'):(S.cap||'no frame yet')}
+$('tabM').onclick=()=>tab('M');$('tabL').onclick=()=>tab('L');
+tick();
+</script></body></html>

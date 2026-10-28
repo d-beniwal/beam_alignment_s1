@@ -1,0 +1,35 @@
+name: beam-align-s1
+
+# Environment for the stage-1 beam-alignment software (align.py CLI, gui.py monitor, balign/, scripts/, tests/).
+#   conda env create -f environment.yml && conda activate beam-align-s1
+#
+# Versions follow the user's `midas-gui` environment so the two stay interchangeable: numpy is held at 1.26.4 because
+# pvapy 5.4.1 (the last release before the numpy>=2 floor) is paired with it there.
+# Everything the SIMULATED workflow needs is conda-forge; pvapy/pyepics (only used by the gated real backend,
+# balign/epics_backend.py) come from pip, exactly as in midas-gui. Installing them does not enable hardware access:
+# the backend still refuses to start without BALIGN_ENABLE_HARDWARE=1 and an explicit --camera.
+
+channels:
+  - conda-forge
+  - defaults
+
+dependencies:
+  - python=3.12
+
+  # ── core numerics / images (used by pinfit, beam_center, axis_align, sim, measure) ──
+  - numpy=1.26.4
+  - scipy=1.17.1
+  - pillow                 # overlay JPEGs, screenshot loader (PIL)
+
+  # ── data + figures (scripts/make_*_figures.py, tests/test_*scan*.py read the HDF5 scans) ──
+  - h5py=3.16.0
+  - matplotlib-base=3.10.*
+  - cmcrameri=1.9          # the user's scientific-plotting colormaps (conda package 1.9; the module's __version__ string says 1.8)
+
+  # ── the web GUI (gui.py) is stdlib-only; nothing to install for it ──
+
+  - pip
+  - pip:
+    # Real-instrument backend only (read-only camera frames over PVA; motor records over CA). NOT needed for --backend sim.
+    - "pvapy==5.4.1"       # pinned: 5.5.0+ requires numpy>=2.0
+    - "pyepics==3.5.10"
