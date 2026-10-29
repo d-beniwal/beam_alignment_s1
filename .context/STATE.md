@@ -11,7 +11,7 @@ QA figures: `analysis/geometry_*.png` (regenerate with `python -I scripts/make_g
 
 ## Next steps
 
-0. **Stage-1 target (2026-10-27): move the pin so its measured axis stays fixed in the image under rotation (eccentricity -> 0), then axis column = beam centre (959.5 on test screenshot).** Plan: fit pin x(omega)=c+a*cos+b*sin at several omega (c = axis, (a,b) = offset in the rotating frame); cancel (a,b) with the two horizontal translations that ride ON the rotation stage. samE.x/z move the pin (axis is fixed by the base). Remaining blockers: base motor for moving the axis (aerox unconfirmed; sign unknown). IMAGE_COL_PER_X=-1 and ROT_SIGN=+1 confirmed by the user 2026-10-28 (hardware test move still pending).
+0. **Stage-1 target (2026-10-27): move the pin so its measured axis stays fixed in the image under rotation (eccentricity -> 0), then axis column = beam centre (959.5 on test screenshot).** Plan: fit pin x(omega)=c+a*cos+b*sin at several omega (c = axis, (a,b) = offset in the rotating frame); cancel (a,b) with the two horizontal translations that ride ON the rotation stage. samE.x/z move the pin (axis is fixed by the base). Base motor = `samE.aerox` (confirmed 2026-10-28; sign still learned by `calibrate`). Pixel size now per camera (`align_config.CAMERA_INFO`). IMAGE_COL_PER_X=-1 and ROT_SIGN=+1 confirmed by the user 2026-10-28 (hardware test move still pending).
 1. Beam-order model of B/C/E hutches + all slits recorded in DOMAIN.md
    (2026-10-26, from screenshots). Still need: distances, IC↔PV mapping,
    alignment sequence, what "aligned" means.
@@ -23,7 +23,7 @@ QA figures: `analysis/geometry_*.png` (regenerate with `python -I scripts/make_g
 
 ## Open questions / blockers
 
-- **Base motor that moves the rotation axis: candidate `samE.aerox` (m101) from prior work, needs user confirmation + sign.**
+- Confirm gh1 pixel size is 0.69 um/px (user wrote "69 micron"); retiga2 (B hutch) PV prefix missing.
 - Integration path to the instrument (read-only/simulated first?).
 - EAA-Pi officially supports Linux only; this machine is macOS (darwin) —
   runtime location (beamline Linux host?) unknown.
@@ -31,6 +31,9 @@ QA figures: `analysis/geometry_*.png` (regenerate with `python -I scripts/make_g
 
 ## Recent changes
 
+- 2026-10-28 (evening): post-test overhaul - pin-excluded beam centre, flank validity + one-sided rescue, view state/hints, raw frame saving, `step-pm`/`fast-align` (no calibration), `find-pin`; sim tests `tests/test_detection.py` + `scripted_agent.py` pass. NEXT: re-test on hardware with raw frames, verify wedge rescue on real data (see DECISIONS).
+- 2026-10-28: per-run isolation: all outputs/logs/figures/raw frames go in `runs/<id>/` (see DECISIONS); sim test OK.
+- 2026-10-28: per-camera pixel size (retiga2 1.0, pg5 1.17, gh1 0.69, pg1 1.17) via `set_camera`; aerox confirmed base motor; sim test OK.
 - 2026-10-27: GUI redesigned (progress tracker, agent-says, verdict tiles with sparklines, stale warning, collapsed raw log); verified with mid-run and final headless screenshots on sim.
 - 2026-10-27: `environment.yml` (env `beam-align-s1`, built + verified: full sim alignment, figure script, backend gate all OK in it). numpy pinned 1.26.4 to match midas-gui/pvapy 5.4.1.
 - 2026-10-27: gated real backend `balign/epics_backend.py` (never run), `align.py live-feed` + GUI live panel (tested on sim); camera PVs from midas-gui recorded. Needs user: camera choice (gh1/pg1/pg5 - screenshot was pg5), review before enabling hardware.

@@ -1,6 +1,6 @@
 """A stand-in 'agent' that follows ALIGNMENT_PLAYBOOK.md using only the CLI (as Claude/Codex would). Simulated backend.
 Usage: python -I tests/scripted_agent.py [--truth JSON] [--pace SECONDS]
-Used to prove the tool set is sufficient end-to-end and to exercise the GUI."""
+Fast flow: measure -> (find-pin) -> fast-align (+-30, +-90, verify). Used to prove the tool set end-to-end and to exercise the GUI."""
 import json
 import subprocess
 import sys
@@ -22,40 +22,36 @@ def call(*a):
     return json.loads(r.stdout)
 
 
-def note(t): print("AGENT:", t); call("note", t)
+LOG = None   # runs/<id>/logs/scripted_agent.log (transcript stays inside the run folder)
 
 
-call("new-run", *(["--truth", truth] if truth else []))
-note("Starting stage-1 alignment: put the pin on the rotation axis (a,b->0), then the axis on the beam centre.")
+def note(t):
+    print("AGENT:", t); call("note", t)
+    if LOG:
+        with open(LOG, "a") as f: f.write(t + "\n")
+
+
+_r = call("new-run", *(["--truth", truth] if truth else []))
+(Path(_r["dir"]) / "logs").mkdir(exist_ok=True)
+LOG = Path(_r["dir"]) / "logs" / "scripted_agent.log"
+note("Starting stage-1 alignment: put the pin on the rotation axis (a,b->0), then the axis on the beam centre. Signs/scales are confirmed constants, so no calibration.")
 m = call("measure", "--omega", 0)
-assert m["pin_col"] is not None, "pin not found"
-note(f"Pin visible at omega=0 (col {m['pin_col']:.1f}, beam cx {m['beam']['cx']:.1f}). Sweeping -90..90.")
-sw = call("sweep")
-note(f"First fit: a={sw['fit']['a']:+.1f}, b={sw['fit']['b']:+.1f}, c={sw['fit']['c']:.1f} px, rms {sw['fit']['rms']:.2f}. Signs are unverified, so calibrate x, z and aerox with small test moves.")
-for motor in ("x", "z", "aerox"):
-    cal = call("calibrate", "--motor", motor, "--mm", 0.02)
-    c = cal["calibration"]
-    note(f"{motor}: d(a,b,c)/mm = ({c['d_a_per_mm']:+.0f},{c['d_b_per_mm']:+.0f},{c['d_c_per_mm']:+.0f}) px/mm; pixel-size check {c['matches_pixel_size']}")
-for it in range(3):
-    sw = call("sweep")
-    f, t = sw["fit"], sw["within_tol"]
-    note(f"Iteration {it}: a={f['a']:+.2f} b={f['b']:+.2f} c-beam={t['c_minus_beam_px']:+.1f} px")
-    if t["a"] and t["b"]:
-        break
-    p = call("propose")["proposed_moves_mm"]
-    for motor in ("z", "x"):
-        if abs(p[motor]) > 5e-4:
-            call("move", motor, round(p[motor], 5), "--reason", f"cancel {'b' if motor == 'z' else 'a'} (pin onto rotation axis)")
-sw = call("sweep")
-if not (sw["within_tol"]["a"] and sw["within_tol"]["b"]):
-    note("Pin is not on the axis after 3 iterations: stopping for the human."); call("finish", "--status", "failed"); raise SystemExit(1)
-note("Pin is on the axis. Now moving the axis (base) onto the beam centre.")
-p = call("propose")["proposed_moves_mm"]
-d = p["aerox"]
-call("move", "aerox", round(d, 5), "--reason", "axis column -> beam centre")
-sw = call("sweep")
-t = sw["within_tol"]
-note(f"Final: a={sw['fit']['a']:+.2f} b={sw['fit']['b']:+.2f} c-beam={t['c_minus_beam_px']:+.2f} px")
-ok = t["a"] and t["b"] and t["c_on_beam"]
-call("finish", "--status", "ok" if ok else "failed", "--summary", f"c-beam {t['c_minus_beam_px']:+.2f} px, a {sw['fit']['a']:+.2f}, b {sw['fit']['b']:+.2f}")
-print("RESULT", "OK" if ok else "FAILED", t)
+if m["view"]["state"] != "in_view":
+    note(f"Pin not cleanly in view at omega=0 ({m['view']['state']}: {m['view']['why']}). Searching for it.")
+    f = call("find-pin")
+    if not f["found"]:
+        note("Could not find the pin within the search limits: stopping for the human."); call("finish", "--status", "failed", "--summary", f["reason"]); raise SystemExit(1)
+    note(f"Pin found after {f['steps']} steps at offset {f['offset_mm']}.")
+else:
+    note(f"Pin in view at omega=0 (col {m['pin_col']:.1f}, beam cx {m['beam']['cx']:.1f}).")
+note("Fast routine: +-30 (z, x), then +-90 (z, x, aerox), then verify.")
+r = call("fast-align")
+for st in r["steps"]:
+    note(f"step +-{st['theta']}: a={st['a']}, b={st['b']:+.2f}, c-beam={st['c_minus_beam_px']:+.1f} px, applied {st['applied']}")
+if not r["ok"]:
+    note("Fast-align stopped: " + r["reason"] + " -> " + str(r.get("suggest"))); call("finish", "--status", "failed", "--summary", r["reason"]); raise SystemExit(1)
+v = r["verify"]
+note(f"Verify at +-{v['theta']}: a={v['a']:+.2f} b={v['b']:+.2f} c-beam={v['c_minus_beam_px']:+.2f} px, converged={v['converged']}")
+call("finish", "--status", "ok" if r["converged"] else "failed", "--summary", f"c-beam {v['c_minus_beam_px']:+.2f} px, a {v['a']:+.2f}, b {v['b']:+.2f}")
+print("RESULT", "OK" if r["converged"] else "FAILED", v)
+sys.exit(0 if r["converged"] else 1)

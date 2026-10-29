@@ -6,6 +6,44 @@ Add new decisions at the top using:
 
 What was decided and why.
 
+## 2026-10-28 — Pin identity check + multi-blob selection (user request: holder / other objects in view)
+
+`pinfit` now considers every dark object of pin-like size and picks the cone-like one (width vs row linear with slope ~2*tan(15.2 deg)=0.544, rel. scatter <6 %, slope tol 15 %), not the biggest; each
+object's shape stats (`cone_slope`, `cone_rel_rms`, `cone_like`, `cone_top_width`, `n_candidates`) are exposed. Tolerances set from real pin frames (files 44/46/47: slope 0.531-0.543, scatter <1.1 %, top width 144-152 px).
+`measure` adds `identity` and a new view state `other_object` (a dark object that is not the pin; top width vs the width learned in this run, both flanks off-angle, or not cone-like); `find-pin` treats it like absent.
+Validated on REAL frames with synthetic objects painted in (`tests/test_identity.py`; empty beam = real frame with the pin inpainted, contrast 0.08 like a real empty frame): pin picked among 3-5 other objects with
+0.04 px error; plain / flared / narrow / short holders and an empty beam are never reported as the pin; real frames from 44/46/47 unchanged. NOT validated: a real holder (shape unknown), real wedge frames
+(raw not saved yet), and a pin merged with a much wider holder under it beyond the simple block cases. Without a learned pin width (first frame of a run) the width test is skipped, so measure omega=0 first.
+
+## 2026-10-28 — Post-beamline-test overhaul: detection guards, fast workflow, pin search (user feedback)
+
+Feedback from the first live runs (`runs/20261028-103726`, `-112616`): hardware link fine, corrections correct, but (1) pin-edge detection failed at some positions, (2) the procedure
+(calibrate x/z/aerox with 7-angle sweeps, many full rotations) was slow whereas "rotate to +-30 -> correct -> +-90 -> correct" was fast, (3) need pin-in-view detection + search.
+Diagnosis from the saved overlay JPEGs (raw frames were NOT saved, so this is from overlays): (a) the "beam centre" (half-max box of whole-row/column means) was dragged by up to ~150 px by
+an off-centre pin shadow (beam cx 1474-1828 vs 1615); (b) at |omega| ~ 60-90 the pin has a grey half-transparent flank (bevel) and pinfit fitted that boundary (near-vertical or wrong-slope side line),
+yet reported status ok; (c) the "pin NOT measured (low_contrast)" frame was a genuinely empty beam (pin out of view), only mislabelled.
+Changes: `measure.beam_footprint` (pin-excluded footprint: columns from rows above the pin top, rows from columns outside the pin; coarse p90 fallback); `_validate` accepts a frame only if both flanks have the
+nominal half-angle (15.2 +- 3 deg), are not inferred, and corners are >= 30 px inside the footprint; if one flank is bad, the axis comes from the good corner +- half of the top width learned in this run
+(`one_sided_*`); otherwise the frame is rejected with reasons, never guessed. `assess_view` = in_view | partial (+x/y hint) | absent (dark object contrast < 0.5) | no_beam; FOV = the lit footprint.
+Raw frames are now saved per measurement (`runs/<id>/raw/*.npz`) so detection can be re-run offline. Workflow: `step-pm THETA [--apply] [--base]` and `fast-align` (+-30 -> +-90 -> verify), no calibration
+(signs/scales confirmed: aerox -1431 px/mm measured today => BASE_COL_PER_AEROX = -1; z +1456, x -1458); per-move limit still enforced by splitting; sign-suspect guard if |b| fails to shrink after a z move.
+`find-pin`: follows the hint when the pin is partly visible, else searches x then y outward in footprint-sized steps within SEARCH_RADIUS_X/Y_MM, returns to start if not found. y sign (IMAGE_ROW_PER_Y = -1: +y moves the pin up) was assumed, then
+confirmed by the user from a hardware test the same day. Caveat: the grey-wedge rescue and thresholds are validated only on a simulated wedge (sim/tests), not yet on raw real frames.
+
+## 2026-10-28 — One self-contained folder per run (user)
+
+Stray files (CLI JSON redirected by the agent, gui/live-feed/test logs, figures) were piling up in `runs/` itself. Now everything for a run lives in `runs/<id>/`: `events.jsonl`, `state.json`,
+`frames/`, plus `outputs/` (every CLI command's JSON is auto-saved by `cli._out` as `NNN_<cmd>.json`), `raw/` (.npy frames), `figures/`, `logs/`, `report/`. Helpers `Run.subdir()` / `Run.save_output()`
+(plain folder names only). `scripts/grab_frame.py CAMERA [NAME]` and `scripts/save_beam_figure.py FRAME NAME` now write inside the current run; `tests/scripted_agent.py` logs to `logs/`; playbook tells agents
+never to write into `runs/` itself. Only `runs/CURRENT` (pointer) remains at the top level. Legacy loose files from the two 2026-10-28 live runs were left untouched (not mapped to a run).
+
+## 2026-10-28 — Per-camera pixel size; `samE.aerox` confirmed as base motor (user)
+
+User: `samE.aerox` is the base motor that puts the pin axis on the beam centre. Tomo cameras: retiga2 (B hutch, 1 um/px), pg5 (C, 1.17), gh1 (E, high-res table, "69 micron" -> taken as
+0.69 um/px: typo-by-factor-100 assumption, consistent with the ~0.69 inferred from the live calibration moves), pg1 (E, near back wall, 1.17). `scripts/align_config.py` now has `CAMERA_INFO`
++ `set_camera()`; `PIXEL_UM` is the active camera's value (default 1.0 with no camera). `Run` stores the camera in `state.inst.camera` and calls `set_camera` on load; `new-run --camera X` rejects
+unknown names; GUI config follows the run's camera. retiga2 has no PV prefix yet, so the epics backend still refuses it. Sim test (`tests/scripted_agent.py`) passes.
+
 ## 2026-10-28 — Sign constants confirmed by the user: IMAGE_COL_PER_X=-1, ROT_SIGN=+1
 
 User confirmed IMAGE_COL_PER_X = -1 and stated the Sector 1 stage is left-handed (+omega = clockwise seen from the top). Derivation: lab x = left, y = up, z = downstream

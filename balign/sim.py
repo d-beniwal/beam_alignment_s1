@@ -19,7 +19,7 @@ class SimInstrument:
             "omega": 0.0, "c": 818.0, "a": -132.0, "b": -10.0,
             "pos": {"x": 0.0, "y": 0.0, "z": 0.0, "aerox": 0.0},
             # hidden truth the agent must discover (can be flipped to test the sign guards)
-            "true_col_per_x": -1.0, "true_k_z": +1.0, "true_col_per_aerox": +1.0,
+            "true_col_per_x": -1.0, "true_k_z": +1.0, "true_col_per_aerox": -1.0, "true_row_per_y": -1.0, "wedge": True,
             "noise": 1.0, "timing_lag_deg": 0.0, "seed": seed, "n_acq": 0,
         }
 
@@ -37,7 +37,7 @@ class SimInstrument:
         if motor == "x":   s["a"] += s["true_col_per_x"] * px
         elif motor == "z": s["b"] += s["true_k_z"] * px
         elif motor == "aerox": s["c"] += s["true_col_per_aerox"] * px
-        elif motor == "y": pass
+        elif motor == "y": s["top_row_shift"] = s.get("top_row_shift", 0.0) + s["true_row_per_y"] * px
         else: raise ValueError(f"unknown motor {motor}")
         s["pos"][motor] += mm
 
@@ -63,8 +63,16 @@ class SimInstrument:
         mod = 1 + 0.12 * np.sin(cols / 140.0 + 1.0) * np.cos(rows / 190.0) + 0.25 * np.exp(-(((cols - 900) / 230.0) ** 2 + ((rows - 700) / 260.0) ** 2))
         beam = PLATEAU * bx * by * mod
         xc = self.true_pin_col(s["omega"] + s["timing_lag_deg"])
-        half = TOP_W / 2 + np.clip(rows - TOP_ROW, 0, None) * np.tan(np.radians(HALF_ANGLE))
-        inside = expit((half - np.abs(cols - xc)) / 1.2) * expit((rows - TOP_ROW) / 1.2)
+        top = TOP_ROW + s.get("top_row_shift", 0.0)
+        tan = np.tan(np.radians(HALF_ANGLE))
+        half = TOP_W / 2 + np.clip(rows - top, 0, None) * tan
+        inside = expit((half - np.abs(cols - xc)) / 1.2) * expit((rows - top) / 1.2)
         img = BG + beam * (1 - (1 - PIN_T) * inside)
+        if s.get("wedge", True) and abs(np.sin(np.radians(s["omega"]))) > 0.8:   # like the real +-90 frames: a half-transparent flank on one side
+            sgn = -1.0 if s["omega"] < 0 else 1.0                                   # outer side flips with the sign of omega
+            dist = sgn * (cols - xc) - half                                           # >0 outside the pin on that side
+            wid = np.clip(rows - top, 0, None) * 0.28
+            wedge = expit(dist / 1.2) * expit((wid - dist) / 1.2) * expit((rows - top) / 1.2)
+            img = img - 0.5 * (img - BG) * wedge
         img = img + rng.normal(0, s["noise"] * np.sqrt(np.maximum(img, 1)) * 0.6)
         return np.clip(img, 0, 65535).astype(np.uint16)

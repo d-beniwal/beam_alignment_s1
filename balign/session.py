@@ -1,10 +1,16 @@
-"""A run = one alignment session: runs/<id>/{events.jsonl, state.json, frames/}. Every CLI call appends events; the GUI tails them."""
+"""A run = one alignment session. EVERYTHING produced for it lives in runs/<id>/ (nothing else is written under runs/ except the CURRENT pointer):
+  events.jsonl, state.json, live.jpg   - core record (CLI appends events; the GUI tails them)
+  frames/   JPEGs shown in the GUI       outputs/  JSON printed by every CLI command (auto-saved, NNN_<cmd>.json)
+  raw/      raw .npy frames              figures/  beam/analysis figures (+ json)
+  logs/     process logs (live-feed, scripted agent, ...)      report/  make_report.py output
+Use Run.subdir(name) / Run.save_output(...) rather than building paths by hand."""
 import json
 import time
 from datetime import datetime
 from pathlib import Path
 from . import RUNS_DIR
 from .sim import SimInstrument
+import align_config as cfg
 
 
 def get_backend(name, state=None, seed=0, camera=None):
@@ -24,12 +30,18 @@ class Run:
         self.state_path = self.dir / "state.json"
         self.state = json.loads(self.state_path.read_text())
         self.inst = get_backend(self.state["backend"], self.state["inst"])
+        cam = self.state["inst"].get("camera")
+        cfg.set_camera(cam if cam in cfg.CAMERA_INFO else None)   # pixel size follows the run's camera
 
     # -- lifecycle ---------------------------------------------------------------------------------------------------
     @classmethod
     def create(cls, backend="sim", seed=0, truth=None, camera=None):
         # Build the backend first: a refused/failed backend must not leave a run directory behind.
         inst = get_backend(backend, None, seed, camera)
+        if camera and camera not in cfg.CAMERA_INFO:
+            raise ValueError(f"unknown camera '{camera}'; choose from {sorted(cfg.CAMERA_INFO)}")
+        if camera:
+            inst.s["camera"] = camera
         if truth:
             inst.s.update(truth)
         RUNS_DIR.mkdir(exist_ok=True)       # the only place this code creates directories: inside runs/
@@ -70,6 +82,22 @@ class Run:
         with open(self.events_path, "a") as f:
             f.write(json.dumps(ev) + "\n")
         return ev
+
+    def subdir(self, name):
+        """runs/<id>/<name>/, created on demand. `name` must be a plain folder name (keeps everything inside the run)."""
+        if name != Path(name).name or name in ("", ".", ".."):
+            raise ValueError(f"bad run subfolder '{name}'")
+        d = self.dir / name
+        d.mkdir(exist_ok=True)
+        return d
+
+    def save_output(self, cmd, obj):
+        """Auto-save a CLI command's JSON result as outputs/NNN_<cmd>.json (numbered in call order)."""
+        d = self.subdir("outputs")
+        n = sum(1 for _ in d.glob("*.json")) + 1
+        path = d / f"{n:03d}_{cmd}.json"
+        path.write_text(json.dumps(obj, indent=2, default=float))
+        return path
 
     def next_frame_path(self, tag):
         self.state["n_frames"] += 1

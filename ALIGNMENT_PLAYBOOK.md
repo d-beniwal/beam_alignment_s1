@@ -5,6 +5,10 @@ Assumes the beam is already on the tomo detector (no slits / edge / flux, no wed
 CLI, which logs to `runs/<id>/events.jsonl`; the GUI (`python -I gui.py`, http://localhost:8765) follows it live.
 **You make every decision; the tools never move or loop on their own** (except the explicit `sweep` and `calibrate` helpers).
 
+**One folder per run:** everything for a run goes in `runs/<id>/` — the CLI auto-saves each command's JSON to `outputs/`, frames to `frames/`, raw
+frames to `raw/`, figures to `figures/`, logs to `logs/`, reports to `report/`. Never write files to `runs/` itself, `/tmp`, or the repo root; redirect
+any process log to `runs/<id>/logs/<name>.log` (get `<id>` from `new-run`).
+
 ## Safety (absolute)
 - Use `--backend sim`. A real `epics` backend exists (`balign/epics_backend.py`) but is gated (needs `BALIGN_ENABLE_HARDWARE=1` + `--camera`) and must only be enabled by the user after review; never set that variable yourself. Never run
   anything that touches EPICS / the beamline. If asked to "start the alignment" on the real instrument, say it is not enabled yet.
@@ -19,6 +23,9 @@ CLI, which logs to `runs/<id>/events.jsonl`; the GUI (`python -I gui.py`, http:/
 | `status` | positions, last fit, calibrations |
 | `goto-omega DEG` / `measure [--omega DEG]` | rotate / acquire + pin + beam measurement (overlay image to the GUI) |
 | `sweep [--angles ...]` | measure at several omegas (default −90…90 step 30) and fit `x(ω)=c+a·cosω+b·sinω`; reports tolerances |
+| `step-pm THETA [--apply] [--base]` | **fast step**: measure 0, ±THETA (one monotonic rotation) → a, b, c; `--apply` moves z (b), x (a, THETA ≥ 30) and with `--base` aerox (c → beam centre) |
+| `fast-align [--no-verify]` | the whole quick routine: `step-pm 30 --apply`, `step-pm 90 --apply --base`, then a verify `step-pm 90` (≈ 3 short rotations, ~1–2 min on hardware) |
+| `find-pin [--max-steps N] [--no-y]` | pin out of view/partly visible: follows the hint or searches x (then y) outward in footprint-sized steps within `SEARCH_RADIUS_*`; returns to the start if not found. **Moves stages** |
 | `estimate-pm THETA` | measure at 0, ±THETA; b = (x₊−x₋)/(2 sin θ); a only for θ ≥ 30 |
 | `calibrate --motor M --mm D` | small test move (then undone): learns d(a,b,c)/mm, checks it against the pixel size |
 | `propose` | moves that would cancel a, b and bring c onto the beam centre (**does not move**) |
@@ -29,19 +36,23 @@ CLI, which logs to `runs/<id>/events.jsonl`; the GUI (`python -I gui.py`, http:/
 ## Model (what the numbers mean)
 Pin column vs rotation angle: `x(ω) = c + a·cos ω + b·sin ω` (px). `c` = rotation-axis column (fixed by the base; **samE.x/y/z do not change it**),
 `a` = pin offset along image-x at ω=0 (cancelled by **samE.x**), `b` = pin offset along the beam (cancelled by **samE.z**). The base motor
-(`aerox`, candidate, unconfirmed) moves `c` (and the pin with it). Tolerances: |a|,|b| < `TOL_AB_PX`, |c − beam centre| < `TOL_C_PX`.
+(`aerox`, confirmed, −1 px per µm-pixel direction) moves `c` (and the pin with it). Tolerances: |a|,|b| < `TOL_AB_PX`, |c − beam centre| < `TOL_C_PX`.
 Beam centre = midpoint of the half-maximum footprint (median over the sweep frames).
 
-## Procedure
-1. `new-run`; `note` the plan. `measure --omega 0`: if `pin_col` is null or `status != ok`, stop and report (pin out of view / low contrast) — do not guess.
-2. `sweep`. Sanity-check: `rms` small (≲1–2 px; large ⇒ look at the frames, maybe omega timing), all frames valid, pin fully in view at every angle
-   (if some angles lose the pin, rerun over a narrower range, e.g. −60…60, and say so).
-3. **Signs/scales are unverified on first use:** `calibrate` x, z and aerox with ~0.02 mm test moves. Require each motor's main term to be ≈ 1000/PIXEL_UM px/mm
-   (`matches_pixel_size` true) and the cross terms ≈ 0. If not, stop and report. `propose` uses calibrations automatically.
-4. Pin onto the axis: `propose` → `move z`, `move x` (skip if |Δ| < 0.0005 mm) → `sweep` → check `within_tol`. Repeat up to 3 times. If |a| or |b| grows after a move, stop
-   (sign problem) and report.
-5. Axis onto the beam: `propose` → `move aerox` → `sweep`. c − beam must be < `TOL_C_PX`, and a, b must stay in tolerance (the pin rides with the base).
-6. `finish --status ok --summary "<final a, b, c−beam>"`. On any stop condition, `finish --status failed` with the reason and what you would try next.
+## Detection (what `measure` tells you)
+Every measurement has `view.state`: **in_view** (usable), **partial** (pin seen but edges unreliable / clipped; `view.hint` = suggested x/y move),
+**absent** (no dark pin-sized object inside the lit footprint), **other_object** (a dark object is in view but it is not cone-shaped like the pin — e.g. the holder; treated like absent by `find-pin`), **no_beam** (no lit footprint). The *field of view is the lit footprint*, not the sensor.
+`pin_col` is only set for **usable** frames (`quality`: `both_flanks`, or `one_sided_left/right` when one flank was the grey bevel wedge at large |ω| and the other
+flank + the learned top width were used). Rejected frames carry `reasons`; never use their `pin_col_raw`. The beam centre ignores the pin shadow.
+The pin's top width is learned from the first both-flank frames (so measure ω=0 first, or let `step-pm` do it). Raw frames are in `runs/<id>/raw/*.npz`.
+
+## Procedure (fast; no calibration — signs/scales are confirmed constants)
+1. `new-run --camera <name>` (sets the pixel size); `note` the plan. `measure --omega 0`. If `view.state != in_view` → `find-pin`; if it fails, `finish --status failed` and report.
+2. `fast-align`. It stops with a reason + `suggest` if the pin is not usable at ±θ (e.g. runs into the lit-area edge → try `step-pm 60 --apply --base`, or `find-pin` first).
+   Equivalent manual form: `step-pm 30 --apply` → `step-pm 90 --apply --base` → `step-pm 90` (verify). If |b| fails to shrink after a z move it refuses to move again (sign suspect).
+3. Done when the verify step reports `converged` (|a|,|b| < `TOL_AB_PX`, |c − beam| < `TOL_C_PX`). If not, repeat `step-pm 90 --apply --base` once more; then `finish`.
+4. `finish --status ok --summary "<final a, b, c−beam>"`. On any stop condition, `finish --status failed` with the reason and what you would try next.
+`sweep`/`calibrate`/`propose`/`move` remain for diagnosis (e.g. a suspected sign problem); `calibrate` is **not** part of the normal run. Narrate with `note` before each decision.
 
 ## Reference run
-`python -I tests/scripted_agent.py` is a scripted agent following exactly this procedure on the simulator (~90 s); useful to see the expected event flow.
+`python -I tests/scripted_agent.py` is a scripted agent following exactly this procedure on the simulator (~10 s); `python -I tests/test_detection.py` (sim) and `python -I tests/test_identity.py` (real frames in `s1_data/` + painted-in objects) check the detection logic; useful to see the expected event flow.

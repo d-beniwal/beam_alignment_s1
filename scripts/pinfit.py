@@ -63,6 +63,10 @@ class Params:
     corner_probe_px: int = 45       # far end of the window probed beyond a plateau end (corners round off over ~25 px)
     corner_min_slope: float = 0.75  # min |dy/dx| of the boundary beyond a real corner (side steepness)
     expected_top_width_px: float | None = None  # prior used only to size a clipped-corner shift
+    expected_half_angle_deg: float = 15.2  # cone half-angle of the pin; used to tell the pin from other dark objects (holder, ...)
+    cone_slope_tol: float = 0.15    # |dwidth/drow - expected| / expected allowed for a 'cone-like' object (real pin frames: 0.53-0.54 vs 0.544 expected)
+    cone_rms_tol: float = 0.06      # rms of width(row) about its line, relative to the mean width
+    cone_min_rows: int = 60         # fewer usable rows -> shape unknown (not judged)
 
 
 @dataclass
@@ -128,6 +132,11 @@ class PinFit:
     field_too_small: bool = False    # pin wider than the usable field
     move_pin_image_x: str = "none"   # right | left | none | unknown
     move_pin_image_y: str = "none"   # down | none
+    cone_slope: float = np.nan       # d(width)/d(row) of the chosen dark object (cone: 2*tan(half angle))
+    cone_rel_rms: float = np.nan
+    cone_top_width: float = np.nan   # width of the chosen object extrapolated to its top row (px)
+    cone_like: bool | None = None    # True: width grows linearly like the pin cone; False: some other object; None: too few rows to judge
+    n_candidates: int = 0            # dark objects of pin-like size considered
     shift_y_px: float = 0.0
     confidence: str = "high"
     notes: list = field(default_factory=list)
@@ -345,6 +354,34 @@ def _longest_run(mask_row):
 # --------------------------------------------------------------------------- #
 # main entry point
 # --------------------------------------------------------------------------- #
+def _cone_stats(comp, p: Params):
+    """Is this dark object cone-like? Width per row (rim-touching rows skipped) vs row: linear with slope ~ 2*tan(half angle)
+    and small scatter. Returns (slope, rel_rms, like) with like=None when there are too few rows to judge."""
+    h, w = comp.shape
+    ys = np.flatnonzero(comp.any(1))
+    if len(ys) == 0:
+        return np.nan, np.nan, None, np.nan
+    xs0, xs1 = [], []
+    rows = []
+    for y in ys[p.edge_start_px:]:
+        r = comp[y]
+        if r[0] or r[-1]:
+            continue
+        idx = np.flatnonzero(r)
+        rows.append(y); xs0.append(idx[0]); xs1.append(idx[-1])
+    if len(rows) < p.cone_min_rows:
+        return np.nan, np.nan, None, np.nan
+    rows = np.asarray(rows, float)
+    wid = np.asarray(xs1, float) - np.asarray(xs0, float) + 1
+    step = max(1, len(rows) // 200)
+    slope, icpt, *_ = theilslopes(wid[::step], rows[::step])
+    rms = float(np.sqrt(np.mean((wid - (icpt + slope * rows)) ** 2)))
+    rel = rms / max(float(wid.mean()), 1.0)
+    exp = 2.0 * np.tan(np.radians(p.expected_half_angle_deg))
+    like = bool(abs(slope - exp) / exp <= p.cone_slope_tol and rel <= p.cone_rms_tol and slope > 0)
+    return float(slope), float(rel), like, float(icpt + slope * ys[0])
+
+
 def fit_pin(image, params: Params | None = None, dark=None, white=None, return_debug=False):
     p = params or Params()
     out = PinFit()
@@ -430,8 +467,21 @@ def _fit(image, p: Params, dark, white, out: PinFit, dbg):
         return
     areas = ndi.sum(dark_mask, lab, range(1, n + 1))
     k = 1 + int(np.argmax(areas))
+    cands = [i + 1 for i in range(n) if areas[i] >= p.min_area_frac * h * w]
+    out.n_candidates = len(cands)
+    if len(cands) > 1:     # several pin-sized dark objects (holder, wire, debris ...): take the cone-like one, not the biggest
+        scored = []
+        for i in cands:
+            sl, rel, like, _tw = _cone_stats(lab == i, p)
+            if like:
+                scored.append((abs(sl - 2.0 * np.tan(np.radians(p.expected_half_angle_deg))), -areas[i - 1], i))
+        if scored:
+            k = min(scored)[2]
+            if k != 1 + int(np.argmax(areas)):
+                out.notes.append(f"{len(cands)} dark objects: chose the cone-like one (not the largest)")
     comp = lab == k
     out.pin_area_px = int(areas[k - 1])
+    out.cone_slope, out.cone_rel_rms, out.cone_like, out.cone_top_width = _cone_stats(comp, p)
     dbg.update(rat=rat, comp=comp, level=level, origin=(x0, y0))
     if out.pin_area_px < p.min_area_frac * h * w:
         out.status, out.message = "no_pin", f"largest dark object only {out.pin_area_px} px"

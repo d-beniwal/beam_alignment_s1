@@ -37,7 +37,12 @@ class H(BaseHTTPRequestHandler):
         if u.path == "/":
             return self._send((Path(__file__).parent / "gui.html").read_text(), "text/html; charset=utf-8")
         if u.path == "/api/config":
-            return self._send({"pixel_um": cfg.PIXEL_UM, "tol_ab_px": cfg.TOL_AB_PX, "tol_c_px": cfg.TOL_C_PX,
+            try:
+                cam = json.loads((RUNS_DIR / rid / "state.json").read_text())["inst"].get("camera") if rid else None
+            except Exception:
+                cam = None
+            cfg.set_camera(cam if cam in cfg.CAMERA_INFO else None)
+            return self._send({"pixel_um": cfg.PIXEL_UM, "camera": cfg.CAMERA, "tol_ab_px": cfg.TOL_AB_PX, "tol_c_px": cfg.TOL_C_PX,
                                "latest": _latest(), "runs": sorted(p.name for p in RUNS_DIR.iterdir() if p.is_dir()) if RUNS_DIR.exists() else []})
         if rid is None:
             return self._send({"events": [], "state": None})

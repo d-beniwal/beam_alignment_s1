@@ -1,5 +1,5 @@
-"""Beam-footprint centre + FWHM figure from a raw frame (.npy). Usage: python -I scripts/save_beam_figure.py FRAME.npy OUT_PREFIX
-Writes OUT_PREFIX.png and OUT_PREFIX.json. Top axis = column profile (+ full width at half max), right axis = row profile.
+"""Beam-footprint centre + FWHM figure from a raw frame (.npy). Usage: python -I scripts/save_beam_figure.py FRAME.npy NAME [--run ID]
+Writes runs/<id>/figures/NAME.png and NAME.json (inside the run folder). Top axis = column profile (+ full width at half max), right axis = row profile.
 Method = beam_center.half_max_footprint (half-maximum footprint midpoint, user decision 2026-10-27)."""
 import sys, json
 sys.dont_write_bytecode = True
@@ -13,7 +13,11 @@ import beam_center as bc
 import align_config as cfg
 
 img = np.load(sys.argv[1]).astype(np.float32)
-prefix = sys.argv[2]
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from balign.session import Run
+_a = sys.argv[1:]
+_run = Run.current(_a[_a.index("--run") + 1] if "--run" in _a else None)
+prefix = str(_run.subdir("figures") / Path(sys.argv[2]).name)
 h = bc.half_max_footprint(img)
 x0, x1, y0, y1 = (int(v) for v in h["box"])
 cx, cy = h["cx"], h["cy"]
