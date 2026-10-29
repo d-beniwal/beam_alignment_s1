@@ -40,7 +40,7 @@ Pin column vs rotation angle: `x(ω) = c + a·cos ω + b·sin ω` (px). `c` = ro
 Beam centre = midpoint of the half-maximum footprint (median over the sweep frames).
 
 ## Detection (what `measure` tells you)
-Every measurement has `view.state`: **in_view** (usable), **partial** (pin seen but edges unreliable / clipped; `view.hint` = suggested x/y move),
+Every measurement has `view.state`: **in_view** (usable), **partial** (pin seen but cut off / edges unreliable; `view.hint` = the x/y move that centres it, `view.locate` = estimated axis column and top row from the visible part),
 **absent** (no dark pin-sized object inside the lit footprint), **other_object** (a dark object is in view but it is not cone-shaped like the pin — e.g. the holder; treated like absent by `find-pin`), **no_beam** (no lit footprint). The *field of view is the lit footprint*, not the sensor.
 `pin_col` is only set for **usable** frames (`quality`: `both_flanks`, or `one_sided_left/right` when one flank was the grey bevel wedge at large |ω| and the other
 flank + the learned top width were used). Rejected frames carry `reasons`; never use their `pin_col_raw`. The beam centre ignores the pin shadow.
@@ -55,4 +55,4 @@ The pin's top width is learned from the first both-flank frames (so measure ω=0
 `sweep`/`calibrate`/`propose`/`move` remain for diagnosis (e.g. a suspected sign problem); `calibrate` is **not** part of the normal run. Narrate with `note` before each decision.
 
 ## Reference run
-`python -I tests/scripted_agent.py` is a scripted agent following exactly this procedure on the simulator (~10 s); `python -I tests/test_detection.py` (sim) and `python -I tests/test_identity.py` (real frames in `s1_data/` + painted-in objects) check the detection logic; useful to see the expected event flow.
+`python -I tests/scripted_agent.py` is a scripted agent following exactly this procedure on the simulator (~10 s); `python -I tests/test_detection.py` (sim) `python -I tests/test_identity.py` (real frames in `s1_data/` + painted-in objects) and `python -I tests/test_partial.py` (real frames, pin moved half out of view, closed loop) check the detection logic; useful to see the expected event flow.

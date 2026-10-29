@@ -6,6 +6,18 @@ Add new decisions at the top using:
 
 What was decided and why.
 
+## 2026-10-28 — Partly visible pin: locate it and compute the move (user request)
+
+When the pin is half cut off (lit-footprint rim) or its top is above / body barely above the footprint, `measure.locate_partial` finds it from the dark object's per-row extents and the cone model
+(width(y) = W + 2 t (y - y_top), W and t learned in the run): rows touching a rim give c = free_edge -/+ width/2, free rows give (l+r)/2, a cut-off top is found from the widths of free rows.
+The hint is then exact: x move to put the pin axis on the beam centre, y move to put the top at 20 % of the footprint height (`view.hint` + `view.locate`). Without a learned width it falls back to
+pinfit's (lower-bound) shift + 15 % of the footprint (converges in 1-2 moves in tests). Supporting fixes found on real frames: pinfit's search box is ~40 px wider than the real lit rim, so rows
+touching the real rim were treated as unclipped and fed wrong flank fits (probably a cause of the earlier bad detections) -> `Params.lit_box`/`rim_guard_px` (rims from the robust footprint + 36 px);
+beam footprint now also uses the dark-object mask (works with a partial pin) and a footprint learned from clean frames (`beam_prior`); clipped flanks are no longer taken as evidence of 'other object'.
+Test (`tests/test_partial.py`, real frames, pin shadow moved relative to the fixed footprint): axis estimated within ~1-5 px when >= ~half visible (worse with a sliver left), suggested move within ~10-70 px
+of the centring move, and applying it brings the pin to usable in_view with column error < 1.5 px in every case (half cut left/right at 3 depths, top 60/200/350 px above, combined cut + top above, 4 frames).
+Not tested: pin bottom stub only (works as in_view), holder in the same frame as a partial pin, real (not emulated) moves.
+
 ## 2026-10-28 — Pin identity check + multi-blob selection (user request: holder / other objects in view)
 
 `pinfit` now considers every dark object of pin-like size and picks the cone-like one (width vs row linear with slope ~2*tan(15.2 deg)=0.544, rel. scatter <6 %, slope tol 15 %), not the biggest; each

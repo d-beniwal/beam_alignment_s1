@@ -20,7 +20,7 @@ def _cross(profile, sigma=5.0, frac=0.5):
     return lo, hi
 
 
-def beam_footprint(img, pin=None, margin=15, pin_present=True):
+def beam_footprint(img, pin=None, margin=15, pin_present=True, geom=None):
     """Half-maximum footprint of the lit area (centre = midpoint, user decision 2026-10-27) that IGNORES the pin shadow.
 
     The old estimate averaged whole rows/columns, so a pin sitting off-centre darkened one side and dragged the 'beam centre'
@@ -45,7 +45,9 @@ def beam_footprint(img, pin=None, margin=15, pin_present=True):
     method = "p90-coarse"
     # refinement at full resolution, excluding the pin
     xl = xr = top = None
-    if pin is not None and getattr(pin, "left_line", None) is not None and getattr(pin, "right_line", None) is not None \
+    if geom is not None:                                    # (x_left, x_right, top_row) of the pin's dark object, e.g. from its mask
+        xl, xr, top = geom
+    elif pin is not None and getattr(pin, "left_line", None) is not None and getattr(pin, "right_line", None) is not None \
             and np.isfinite(getattr(pin, "top_row", np.nan)):
         top = float(pin.top_row)
         ys = (top, r1)
@@ -79,13 +81,26 @@ def beam_footprint(img, pin=None, margin=15, pin_present=True):
             "width": float(c1 - c0), "height": float(r1 - r0), "method": method}
 
 
-def measure_frame(img, omega, prior=None):
+def _pin_geom(r, dbg):
+    """(x_left, x_right, top_row) of the pin's dark object in full-image coordinates, from the pinfit mask (works for a partly visible pin)."""
+    if dbg is None or "comp" not in dbg:
+        return None
+    comp, (ox, oy) = dbg["comp"], dbg["origin"]
+    ys, xs = np.flatnonzero(comp.any(1)), np.flatnonzero(comp.any(0))
+    if len(ys) == 0:
+        return None
+    return float(xs[0] + ox), float(xs[-1] + ox), float(ys[0] + oy)
+
+
+def measure_frame(img, omega, prior=None, beam_prior=None):
     """Pin + beam measurement on one frame. Returns a JSON-able dict (never raises on a bad frame).
 
-    `prior` = {"top_width": px, "half_angle_deg": deg} learned earlier in the run (optional). A frame is `usable` only if the pin's top
+    `prior` = {"top_width": px, "half_angle_deg": deg} learned earlier in the run (optional); `beam_prior` = the lit footprint learned from clean frames. A frame is `usable` only if the pin's top
     corners and both flanks are real pin edges inside the lit footprint; if just one flank is trustworthy and a top-width prior exists,
     the axis is taken from that flank (`quality` = one_sided_left/right). Everything else is rejected with `reasons` (never guessed)."""
-    r = pinfit.fit_pin(img)
+    coarse = beam_footprint(img)           # pin-independent lit footprint: tells pinfit where the real rims are
+    prm = pinfit.Params(lit_box=tuple(coarse["box"])) if coarse else None
+    r, dbg = pinfit.fit_pin(img, prm, return_debug=True)
     out = {"omega": float(omega), "status": r.status, "message": r.message, "confidence": str(r.confidence),
            "pin_col": None, "pin_col_raw": None, "usable": False, "quality": None, "reasons": [], "top_row": None, "top_width": None,
            "half_angle_deg": None, "full_view": bool(r.full_view), "notes": list(r.notes),
@@ -95,7 +110,9 @@ def measure_frame(img, omega, prior=None):
     pin_obj = (r.status not in ("no_pin", "low_contrast", "error")) and np.isfinite(r.contrast) and r.contrast >= cfg.PIN_MIN_CONTRAST \
         and r.pin_area_px > 0.002 * (img.shape[0] * img.shape[1] * 0.2)
     out["pin_object"] = bool(pin_obj)
-    b = beam_footprint(img, r if pin_obj else None, pin_present=bool(pin_obj))
+    b = beam_footprint(img, r if pin_obj else None, pin_present=bool(pin_obj), geom=_pin_geom(r, dbg) if pin_obj else None)
+    if beam_prior and (b is None or b.get("method") != "pin-excluded"):   # the footprint is fixed during a run: reuse the one learned from clean frames
+        b = dict(beam_prior, method="prior")
     out["beam"] = b if b else {"cx": float("nan"), "cy": float("nan"), "box": [0, 0, 0, 0], "width": 0.0, "height": 0.0, "method": "failed"}
     if r.status == "ok" and np.isfinite(r.axis_x_top) and pin_obj:
         out.update(pin_col_raw=float(r.axis_x_top), top_row=float(r.top_row), top_width=float(r.top_width),
@@ -110,7 +127,7 @@ def measure_frame(img, omega, prior=None):
     if pin_obj and wp and out["cone_top_width"] and abs(out["cone_top_width"] - wp) / wp > 2 * cfg.TOP_WIDTH_TOL:
         out["identity"] = "other"
         out["reasons"].append(f"object top width ~{out['cone_top_width']:.0f}px vs {wp:.0f}px learned for the pin")
-    out["view"] = assess_view(out, r)
+    out["view"] = assess_view(out, r, dbg, prior)
     out["_fit"] = r
     return out
 
@@ -125,13 +142,13 @@ def _validate(r, beam, prior, out):
     def side_ok(name, ang, line, corner, inferred):
         why = []
         if line is None or corner is None:
-            return ["missing"]
+            return ["missing (clipped)"]
         if inferred:
-            why.append("inferred")
+            why.append("inferred (clipped)")
         if not np.isfinite(ang) or abs(ang - nom) > cfg.HALF_ANGLE_TOL_DEG:
             why.append(f"slope {ang:.1f}deg vs {nom:.1f}")
         if not (bx0 + cfg.CLIP_MARGIN_PX <= corner[0] <= bx1 - cfg.CLIP_MARGIN_PX):
-            why.append("corner at lit-area edge")
+            why.append("corner at lit-area edge (clipped)")
         return why
     wl = side_ok("L", r.half_angle_left_deg, r.left_line, tl, r.left_inferred)
     wr = side_ok("R", r.half_angle_right_deg, r.right_line, tr, r.right_inferred)
@@ -142,7 +159,8 @@ def _validate(r, beam, prior, out):
             reasons.append(f"pin runs off the {side} lit-area edge over {frac:.0%} of its length")
     if not wl and not wr and w_prior and r.top_width and abs(r.top_width - w_prior) / w_prior > cfg.TOP_WIDTH_TOL:
         return {"identity": "other", "reasons": [f"top width {r.top_width:.0f}px vs {w_prior:.0f}px learned for the pin: a different object"]}
-    if wl and wr:     # neither flank has the pin's cone angle
+    clip_involved = any("clipped" in x for x in wl + wr) or any("runs off" in x for x in reasons)
+    if wl and wr and not clip_involved:     # neither flank has the pin's cone angle, and it is not just the rim cutting the pin
         return {"identity": "other", "reasons": reasons + [f"left flank: {'; '.join(wl)}", f"right flank: {'; '.join(wr)}"]}
     if not reasons and not wl and not wr:
         return {"pin_col": float(r.axis_x_top), "usable": True, "quality": "both_flanks", "identity": "pin"}
@@ -155,7 +173,46 @@ def _validate(r, beam, prior, out):
     return {"reasons": reasons + ([f"left flank: {'; '.join(wl)}"] if wl else []) + ([f"right flank: {'; '.join(wr)}"] if wr else [])}
 
 
-def assess_view(m, r):
+def locate_partial(r, dbg, prior, nominal_half_angle=None):
+    """Where is a partly visible pin, and how far must it move? Uses the dark object's per-row extents and the cone model with the width
+    learned in this run:  width(y) = W + 2 t (y - y_top).  Rows that run into the lit-area rim only constrain their free edge, so
+    c = r_edge - width/2 (left side cut) or l_edge + width/2 (right side cut); rows with both edges free give (l+r)/2 directly.
+    If the top is cut off, y_top follows from the width of free rows. Returns None when it cannot be done."""
+    if not prior or not prior.get("top_width") or dbg is None or "comp" not in dbg or r.box is None:
+        return None
+    comp, (ox, oy) = dbg["comp"], dbg["origin"]
+    h, w = comp.shape
+    gl, gr, gt = dbg.get("guards", (24, 24, 24))
+    ys = np.flatnonzero(comp.any(1))
+    if len(ys) < 40:
+        return None
+    first = comp.argmax(1)
+    last = w - 1 - comp[:, ::-1].argmax(1)
+    W = float(prior["top_width"])
+    t = np.tan(np.radians(prior.get("half_angle_deg") or nominal_half_angle or cfg.NOMINAL_HALF_ANGLE_DEG))
+    y0 = int(ys[0])
+    top_clipped = y0 <= gt
+    rows = ys[(ys >= (y0 + 12 if not top_clipped else gt + 12)) & (ys < min(int(ys[-1]) - 6, h - gt))]
+    if len(rows) < 20:
+        return None
+    l, rr = first[rows].astype(float), last[rows].astype(float)
+    lc, rc = l <= gl, rr >= w - 1 - gr
+    free = ~lc & ~rc
+    ytop = float(y0)
+    if top_clipped:                                    # how far above the lit area the top is: from the widths of free rows
+        if free.sum() < 10:
+            return None
+        ytop = float(np.median(rows[free] - ((rr - l + 1)[free] - W) / (2 * t)))
+    wm = W + 2 * t * (rows - ytop)                     # model width per row
+    c = np.where(free, (l + rr) / 2, np.where(lc & ~rc, rr - wm / 2, np.where(rc & ~lc, l + wm / 2, np.nan)))
+    c = c[np.isfinite(c)]
+    if len(c) < 10:
+        return None                                    # every row cut on both sides: pin wider than the field
+    return {"axis_col": float(np.median(c)) + ox, "top_row": ytop + oy, "top_clipped": bool(top_clipped),
+            "cut_left": bool(lc.any()), "cut_right": bool(rc.any()), "rows_cut_frac": float((~free).mean())}
+
+
+def assess_view(m, r, dbg=None, prior=None):
     """Is the pin in the field of view - and if not, which way to move it? The 'field of view' is the LIT footprint, not the sensor.
     state: in_view | partial | absent | other_object | no_beam. `hint` = which stage move would bring it in (x from image shift, y assumed sign)."""
     b = m["beam"]
@@ -172,6 +229,22 @@ def assess_view(m, r):
     if not m.get("pin_object"):
         return {"state": "absent", "hint": None, "why": f"no dark pin-sized object inside the lit area ({r.status}, contrast {r.contrast:.2f} < {cfg.PIN_MIN_CONTRAST})"
                 if np.isfinite(r.contrast) else f"no dark pin-sized object inside the lit area ({r.status})"}
+    loc = locate_partial(r, dbg, prior)
+    if loc:                                                      # exact move from the cone model: put the pin axis on the beam centre
+        by0, by1 = b["box"][2], b["box"][3]
+        out_loc = dict(loc)
+        if loc["cut_left"] or loc["cut_right"]:
+            dx = b["cx"] - loc["axis_col"]                       # image px the pin must move right (+) / left (-)
+            hint["x_mm"] = cfg.px_to_mm(dx / cfg.IMAGE_COL_PER_X)
+            hint["x_image_dir"] = "right" if dx > 0 else "left"
+        target_top = by0 + 0.2 * b["height"]
+        if loc["top_clipped"] or loc["top_row"] > by0 + 0.55 * b["height"]:
+            dy = target_top - loc["top_row"]                     # image px the pin must move down (+) / up (-)
+            hint["y_mm"] = cfg.px_to_mm(dy / cfg.IMAGE_ROW_PER_Y)
+        if hint:
+            hint["from"] = "cone model"
+            return {"state": "partial", "hint": hint, "locate": out_loc,
+                    "why": "; ".join(m["reasons"]) or "pin partly outside the lit area"}
     if getattr(r, "move_pin_image_x", "none") in ("left", "right") and abs(r.shift_px) > 0:
         # pinfit's shift only clears the border (and is just a lower bound when the flank is lost): add a margin / a footprint-fraction step
         sgn = 1.0 if r.move_pin_image_x == "right" else -1.0

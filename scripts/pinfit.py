@@ -62,6 +62,8 @@ class Params:
     flat_tilt_deg: float = 1.0      # ... and |tilt| <= this
     corner_probe_px: int = 45       # far end of the window probed beyond a plateau end (corners round off over ~25 px)
     corner_min_slope: float = 0.75  # min |dy/dx| of the boundary beyond a real corner (side steepness)
+    lit_box: tuple | None = None    # (x0, x1, y0, y1) robust half-max lit footprint, full-image px; rims for 'clipped' are THIS box + edge_guard (the loose box is up to ~40 px wider)
+    rim_guard_px: int = 36          # distance from the lit-footprint half-max rim inside which a dark-object edge is a clipped edge (rim blur ~ +-25 px)
     expected_top_width_px: float | None = None  # prior used only to size a clipped-corner shift
     expected_half_angle_deg: float = 15.2  # cone half-angle of the pin; used to tell the pin from other dark objects (holder, ...)
     cone_slope_tol: float = 0.15    # |dwidth/drow - expected| / expected allowed for a 'cone-like' object (real pin frames: 0.53-0.54 vs 0.544 expected)
@@ -354,20 +356,22 @@ def _longest_run(mask_row):
 # --------------------------------------------------------------------------- #
 # main entry point
 # --------------------------------------------------------------------------- #
-def _cone_stats(comp, p: Params):
+def _cone_stats(comp, p: Params, guards=None):
     """Is this dark object cone-like? Width per row (rim-touching rows skipped) vs row: linear with slope ~ 2*tan(half angle)
     and small scatter. Returns (slope, rel_rms, like) with like=None when there are too few rows to judge."""
     h, w = comp.shape
+    gl, gr, gt = guards or (p.edge_guard_px,) * 3
     ys = np.flatnonzero(comp.any(1))
     if len(ys) == 0:
         return np.nan, np.nan, None, np.nan
     xs0, xs1 = [], []
     rows = []
-    for y in ys[p.edge_start_px:]:
+    start = p.edge_start_px if ys[0] > gt else gt + p.edge_start_px   # top cut by the (blurred) rim: skip the rim rows
+    for y in ys[start:]:
         r = comp[y]
-        if r[0] or r[-1]:
-            continue
         idx = np.flatnonzero(r)
+        if idx[0] <= gl or idx[-1] >= w - 1 - gr:   # runs into the rim (clipped): not judged
+            continue
         rows.append(y); xs0.append(idx[0]); xs1.append(idx[-1])
     if len(rows) < p.cone_min_rows:
         return np.nan, np.nan, None, np.nan
@@ -379,7 +383,8 @@ def _cone_stats(comp, p: Params):
     rel = rms / max(float(wid.mean()), 1.0)
     exp = 2.0 * np.tan(np.radians(p.expected_half_angle_deg))
     like = bool(abs(slope - exp) / exp <= p.cone_slope_tol and rel <= p.cone_rms_tol and slope > 0)
-    return float(slope), float(rel), like, float(icpt + slope * ys[0])
+    top_w = float(icpt + slope * ys[0]) if ys[0] > gt else np.nan   # top cut off by the rim: width at the rim is not the top width
+    return float(slope), float(rel), like, top_w
 
 
 def fit_pin(image, params: Params | None = None, dark=None, white=None, return_debug=False):
@@ -423,6 +428,14 @@ def _fit(image, p: Params, dark, white, out: PinFit, dbg):
     y0 = r0 if at["top"] else r0 + ins
     y1 = r1 if at["bottom"] else r1 - ins
     out.box, out.box_at_detector_edge = (x0, x1, y0, y1), at
+    gl_ = 2 if at["left"] else p.edge_guard_px
+    gr_ = 2 if at["right"] else p.edge_guard_px
+    gt_ = 1 if at["top"] else p.edge_guard_px
+    if p.lit_box is not None:      # rims of the real lit footprint, not of the loose search box
+        gl_ = max(gl_, int(p.lit_box[0] - x0) + p.rim_guard_px)
+        gr_ = max(gr_, int(x1 - p.lit_box[1]) + p.rim_guard_px)
+        gt_ = max(gt_, int(p.lit_box[2] - y0) + p.rim_guard_px)
+    guards = (gl_, gr_, gt_)
     sub = sm[y0:y1 + 1, x0:x1 + 1]
     h, w = sub.shape
     if h < 60 or w < 60:
@@ -472,7 +485,7 @@ def _fit(image, p: Params, dark, white, out: PinFit, dbg):
     if len(cands) > 1:     # several pin-sized dark objects (holder, wire, debris ...): take the cone-like one, not the biggest
         scored = []
         for i in cands:
-            sl, rel, like, _tw = _cone_stats(lab == i, p)
+            sl, rel, like, _tw = _cone_stats(lab == i, p, guards)
             if like:
                 scored.append((abs(sl - 2.0 * np.tan(np.radians(p.expected_half_angle_deg))), -areas[i - 1], i))
         if scored:
@@ -481,7 +494,8 @@ def _fit(image, p: Params, dark, white, out: PinFit, dbg):
                 out.notes.append(f"{len(cands)} dark objects: chose the cone-like one (not the largest)")
     comp = lab == k
     out.pin_area_px = int(areas[k - 1])
-    out.cone_slope, out.cone_rel_rms, out.cone_like, out.cone_top_width = _cone_stats(comp, p)
+    out.cone_slope, out.cone_rel_rms, out.cone_like, out.cone_top_width = _cone_stats(comp, p, guards)
+    dbg["guards"] = guards
     dbg.update(rat=rat, comp=comp, level=level, origin=(x0, y0))
     if out.pin_area_px < p.min_area_frac * h * w:
         out.status, out.message = "no_pin", f"largest dark object only {out.pin_area_px} px"
@@ -494,8 +508,7 @@ def _fit(image, p: Params, dark, white, out: PinFit, dbg):
 
     # ---- per-row edges (sub-pixel) -----------------------------------------
     contrast_norm = out.contrast  # (beam - pin) in beam-normalised units
-    gl = 2 if at["left"] else p.edge_guard_px     # no rim blur at a detector border
-    gr = 2 if at["right"] else p.edge_guard_px
+    gl, gr = guards[0], guards[1]                 # no rim blur at a detector border; real lit-footprint rims if known
     rows, Lx, Rx, Lc, Rc, gL, gR = [], [], [], [], [], [], []
     for y in range(ytop_i, ybot_i + 1):
         run = _longest_run(comp[y])
@@ -537,7 +550,7 @@ def _fit(image, p: Params, dark, white, out: PinFit, dbg):
             T[j] = y - 1 + (va - level) / (va - vb) if va > vb else y
         else:
             T[j] = 0.0
-    out.top_clipped = bool(np.nanmin(T) <= (1.0 if at['top'] else p.edge_guard_px))
+    out.top_clipped = bool(np.nanmin(T) <= guards[2])
     plateau = None
     if not out.top_clipped:
         y0p = np.nanpercentile(T, 3)

@@ -34,7 +34,16 @@ def goto_omega(run, deg):
 
 
 def _update_prior(run, m):
-    """Learn the pin's top width / half-angle from frames where both flanks were trusted; used to rescue one-sided frames."""
+    """Learn the pin's top width / half-angle (from frames where both flanks were trusted; used to rescue one-sided frames) and the lit
+    footprint (from clean frames; used when the pin hides part of it)."""
+    b = m["beam"]
+    if m["view"]["state"] == "in_view" and b.get("method") == "pin-excluded":
+        hb = run.state.setdefault("beam_hist", [])
+        hb.append({k: b[k] for k in ("cx", "cy", "width", "height", "box")})
+        del hb[:-20]
+        if len(hb) >= 2:
+            run.state["beam_prior"] = {k: ([int(np.median([e["box"][i] for e in hb])) for i in range(4)] if k == "box" else float(np.median([e[k] for e in hb])))
+                                       for k in ("cx", "cy", "width", "height", "box")}
     if m.get("quality") != "both_flanks":
         return
     h = run.state.setdefault("pin_prior_hist", {"w": [], "ang": []})
@@ -48,7 +57,7 @@ def do_measure(run, omega=None, tag="meas"):
     if omega is not None:
         goto_omega(run, omega)
     img = run.inst.acquire()
-    m = M.measure_frame(img, run.inst.get_omega(), run.state.get("pin_prior"))
+    m = M.measure_frame(img, run.inst.get_omega(), run.state.get("pin_prior"), run.state.get("beam_prior"))
     path, rel = run.next_frame_path(tag)
     M.overlay_jpeg(img, m, path)
     if cfg.SAVE_RAW:   # raw frame next to the overlay so any detection can be re-run / debugged offline
