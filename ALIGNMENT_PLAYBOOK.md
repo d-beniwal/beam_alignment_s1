@@ -9,6 +9,19 @@ CLI, which logs to `runs/<id>/events.jsonl`; the GUI (`python -I gui.py`, http:/
 frames to `raw/`, figures to `figures/`, logs to `logs/`, reports to `report/`. Never write files to `runs/` itself, `/tmp`, or the repo root; redirect
 any process log to `runs/<id>/logs/<name>.log` (get `<id>` from `new-run`).
 
+## Standard beamline run
+Trigger: the user says they are at the beamline and want the alignment started, e.g. *"start the beam alignment at beamline. You can access hardware."* That sentence authorises
+connecting to the hardware and moving samE.x / y / z / aerox and rotating samE.ry within ±90° — **do not ask for confirmation**; only the equipment limits below apply. Then, in order:
+1. **Camera.** Use the one the user named (gh1, pg1, pg5; hutch E/E/C). If none was named, use `DEFAULT_CAMERA` (`scripts/align_config.py`, gh1) and say so in your first note. The camera is assumed to be acquiring already.
+2. **GUI.** If http://localhost:8765 does not answer, start it in the background: `nohup python -I gui.py > /dev/null 2>&1 &` (never write its log into `runs/`). Tell the user the URL.
+3. **Run.** `python -I align.py new-run --backend epics --camera <camera>`, `note` the plan, then `python -I align.py adaptive-align`.
+4. **If it stops (`ok: false`)**: read `reason`, `note` what happened, and try the matching remedy **once** — pin absent / other object / partly in view → `find-pin` then `adaptive-align` again; sign suspect or not
+   converged → run `adaptive-align` once more. If it fails again, `finish --status failed --summary "<reason>"` and stop; tell the user what you saw and what you would try.
+5. **Finish.** `finish --status ok --summary "<final a, b, c−beam in px and the motor positions>"` and report the same numbers to the user.
+6. Everything for the run stays in `runs/<id>/` (the CLI does that; raw frames included). Don't write elsewhere.
+Variations the user may add in words (e.g. "first move the pin 1 mm down", "only ±30°", "align on pg1") are applied on top of this; use the building blocks in *Commands* for them.
+If the user does **not** say they are at the beamline, use the simulator (`new-run` without `--backend`).
+
 ## Hardware and safety
 - Default backend is `sim`. When the user says they are on the real beamline and want to align on hardware, start with `new-run --backend epics --camera <gh1|pg1|pg5|...>`
   (the camera sets the pixel size; ask once only if the user has not said which) and run the alignment — no extra confirmation, no environment switch. Never connect to hardware

@@ -9,6 +9,7 @@ CAMERA_INFO = {
     "gh1":     {"hutch": "E", "pixel_um": 0.69, "note": "high-res table"},
     "pg1":     {"hutch": "E", "pixel_um": 1.17, "note": "close to back wall"},
 }
+DEFAULT_CAMERA = "gh1"   # used by the standard beamline run when the user does not name a camera (the agent says so; last used 2026-10-28, E hutch)
 DEFAULT_PIXEL_UM = 1.0
 PIXEL_UM = DEFAULT_PIXEL_UM
 CAMERA = None

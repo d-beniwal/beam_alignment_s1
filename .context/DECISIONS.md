@@ -6,6 +6,12 @@ Add new decisions at the top using:
 
 What was decided and why.
 
+## 2026-10-30 — Beamline prompt moved into the playbook (user request)
+
+The long prompt in the README was replaced by one sentence: "Start the beam alignment at beamline. You can access hardware." `AGENTS.md` (read first) maps that sentence to the playbook section
+"Standard beamline run": camera (named, else `DEFAULT_CAMERA` = gh1, announced), start the GUI if needed, `new-run --backend epics`, `adaptive-align`, one remedy attempt on failure, finish + report.
+Why a default camera instead of asking: the user wants a one-line prompt; a wrong camera only mis-scales moves (pixel size), which the sign/shrink guard and step limits catch, and the agent states the choice up front.
+
 ## 2026-10-30 — Adaptive alignment procedure + hardware gate removed (user)
 
 Procedure (user's, implemented as `align.py adaptive-align`): omega -> 0; pin axis to the beam centre (x); rotate + in 15 deg steps until the pin can no longer be measured (note how far its axis moved),

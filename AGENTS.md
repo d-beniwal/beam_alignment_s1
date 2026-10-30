@@ -7,6 +7,9 @@ assistant (`../EAA-Pi/`) and driving the Sector 1 Bluesky stack
 (`../mpe_bluesky/`) for device/PV discovery. This directory holds the
 alignment-specific config, skills, workflows, and the curated device/PV list.
 
+**Standard request:** if the user says something like *"start the beam alignment at beamline. You can access hardware."*, that is full authorisation:
+read `ALIGNMENT_PLAYBOOK.md` and carry out its section **"Standard beamline run"** end to end, without asking for confirmation. Everything you need is in the playbook.
+
 **Hardware (updated 2026-10-30, user decision):** when the user says they are on the real beamline and want to align on hardware, just connect and run it
 (`align.py new-run --backend epics --camera <gh1|pg1|pg5>`) — do not ask for confirmation again and again. Default is still the simulator when the user
 does not say so (development sessions, tests). Equipment protection stays on and is not a prompt: per-move step limits, motor soft limits, mm units check,
@@ -26,9 +29,9 @@ bulk-read them:
 - `.context/DECISIONS.md`    — dated decisions and why (newest first)
 - `.context/REFERENCE_prior_work.md` — summary of the earlier `auto_beamline_alignment_tomo` repo (mechanism, motors, bugs)
 
-**Environment:** `conda env create -f environment.yml && conda activate beam-align-s1` (python 3.12, numpy 1.26.4, scipy, pillow, h5py, matplotlib, cmcrameri; pvapy/pyepics are installed for the gated real backend only). Run everything with `python -I ...`.
+**Environment:** `conda env create -f environment.yml && conda activate beam-align-s1` (python 3.12, numpy 1.26.4, scipy, pillow, h5py, matplotlib, cmcrameri; pvapy/pyepics are installed for the real backend). Run everything with `python -I ...`.
 
-**To run an alignment:** read `ALIGNMENT_PLAYBOOK.md` and drive `python -I align.py ...` (simulated backend only). The user watches it in the GUI
+**To run an alignment:** read `ALIGNMENT_PLAYBOOK.md` and drive `python -I align.py ...` (simulator by default; the real beamline when the user says so). The user watches it in the GUI
 (`python -I gui.py`, http://localhost:8765). Code: `balign/` (+ `scripts/` for pinfit/beam_center/axis_align/`align_config.py` = the single place for the
 pixel size and sign constants).
 

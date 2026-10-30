@@ -22,37 +22,22 @@ Always run Python with `-I` (`python -I align.py ...`).
 ## Running on the real beamline
 
 1. On the beamline workstation: `conda activate beam-align-s1`, then start Claude Code in this folder (`claude`). The camera must already be acquiring.
-2. Start the GUI in a second terminal (`python -I gui.py`) and open http://localhost:8765.
-3. Paste a prompt like the one below. **Say explicitly that you are on the real beamline and which camera/hutch** — that is what tells the agent to connect to the
-   hardware (the simulator is the default otherwise) and fixes the pixel size.
-
-### Prompt to paste at the beamline
+2. Open http://localhost:8765 in a browser (the agent starts the GUI if it is not running).
+3. Tell the agent (this is the whole prompt):
 
 ```
-Read AGENTS.md and ALIGNMENT_PLAYBOOK.md in this folder, then .context/STATE.md.
-
-We are on the REAL beamline (APS 1-ID) and I want you to connect to the hardware and run the stage-1 alignment now.
-Tomo camera: <gh1 | pg1 | pg5>  (hutch <E | E | C>). The camera is already acquiring. The alignment pin is in the sample position.
-You are authorised to move samE.x, samE.y, samE.z, samE.aerox and to rotate samE.ry within +-90 deg. Don't ask me for confirmation.
-
-Do this:
-1. python -I align.py new-run --backend epics --camera <camera>   (the GUI is already running and follows the run)
-2. note the plan, then python -I align.py adaptive-align
-   It sets omega to 0, brings the pin into view (find-pin if needed), centres the pin axis on the beam centre, rotates + and - until the pin
-   leaves the field of view, fits, corrects z / x / aerox and repeats until |a|,|b| < 1 px and the axis is on the beam centre (+-2 px).
-3. Narrate each decision with `align.py note`. If adaptive-align stops (ok=false), read its `reason`, tell me what happened and try the
-   suggested remedy ONCE (e.g. find-pin, or re-run adaptive-align); if it still fails, finish the run as failed and stop.
-4. When done: python -I align.py finish --status ok --summary "<final a, b, c-beam in px and the motor positions>".
-Keep every file for this run inside runs/<id>/ (the CLI does that). Tell me the final numbers when finished.
+Start the beam alignment at beamline. You can access hardware.
 ```
 
-Notes on the prompt:
-- Replace `<camera>` — it sets the pixel size (retiga2 1.0 µm/px, pg5 1.17, gh1 0.69, pg1 1.17). `retiga2` (B hutch) has no PV prefix recorded yet, so it only works in the simulator until one is added to `scripts/align_config.py` (`CAMERAS`).
+   Optionally add the camera (`... Use pg1.`; default is `gh1`) or a variation (`... First move the pin 1 mm down.`). That sentence authorises connecting to the hardware; everything else
+   (read the playbook, start the GUI, run `adaptive-align`, retry once on failure, report the result) is in `AGENTS.md` / `ALIGNMENT_PLAYBOOK.md` ("Standard beamline run"), which the agent reads itself.
+
+Notes:
+- The camera sets the pixel size (retiga2 1.0 µm/px, pg5 1.17, gh1 0.69, pg1 1.17). `retiga2` (B hutch) has no PV prefix recorded yet, so it only works in the simulator until one is added to `scripts/align_config.py` (`CAMERAS`).
 - Equipment protection is always on and is not a confirmation prompt: per-move step limits (larger moves are split), motor soft limits, mm-units check, readback check after every move, rotation limited to ±90°.
-- If the pin is not in the beam at all, `adaptive-align` calls `find-pin`, which searches x then y within ±3 mm / ±2 mm of where it started and returns to the start if it finds nothing.
-- Variations: to align only partway ("first move the pin 1 mm down, then ..."), say so in the prompt; the agent can use the building blocks listed in the playbook
-  (`measure`, `step-pm`, `fast-align`, `move`, `find-pin`).
+- If the pin is not in the beam, `adaptive-align` calls `find-pin`, which searches x then y within ±3 mm / ±2 mm of where it started and returns to the start if it finds nothing.
 - Every frame is saved in `runs/<id>/raw/` — keep them: they are how detection problems are debugged afterwards. Send any frame that misbehaved.
+- Without the words "at beamline" / "hardware" the agent uses the simulator.
 
 ## Try it without hardware (simulator)
 
@@ -63,7 +48,7 @@ python -I tests/test_identity.py             # pin vs holder/other objects (need
 python -I tests/test_partial.py              # partly visible pin (needs s1_data/)
 ```
 
-For a sim run by an agent, use the same prompt without "REAL beamline" and with `new-run` (no `--backend`).
+For a sim run by an agent: *"Run the beam alignment on the simulator."*
 
 ## What a run produces
 
