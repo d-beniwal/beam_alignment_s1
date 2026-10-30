@@ -6,6 +6,17 @@ Add new decisions at the top using:
 
 What was decided and why.
 
+## 2026-10-30 — Adaptive alignment procedure + hardware gate removed (user)
+
+Procedure (user's, implemented as `align.py adaptive-align`): omega -> 0; pin axis to the beam centre (x); rotate + in 15 deg steps until the pin can no longer be measured (note how far its axis moved),
+rotate - likewise; fit x(w)=c+a cos w+b sin w (weighted LSQ) to ALL measurements of the pass (>= the two end points, as discussed: more robust than the 2-equation solve); correct z<-b, x<-a, aerox<-c-beam;
+repeat. If a pass reaches +-90 on both sides, later passes use 0, +90, -90 only. Never beyond +-90 (`MAX_ROT_DEG`, `goto_omega` refuses). Refinements agreed in discussion: last *measurable* angle is the limit,
+a half-visible pin located by `locate_partial` extends the range (weight 0.3); a is applied only partly (>= 0.25) and aerox not at all while the range is < 30 deg (poorly conditioned); sign-suspect stop if a/b
+fail to shrink after a correction; converged = |a|,|b| < tol and |c-beam| < tol with range >= 30 deg. Sim: converges in 2 passes (1st pass range e.g. +60/-90, 2nd +-90).
+Hardware: the user found the repeated confirmation / `BALIGN_ENABLE_HARDWARE` gate to be an obstacle on the beamline. Removed: `--backend epics --camera <name>` now just connects when the user says they are on the real
+beamline; default stays the simulator. Kept (equipment protection, not prompts): per-step move limits (moves split), soft limits, mm-units check, readback check, +-90 deg rotation. AGENTS.md, playbook and the workspace
+`CLAUDE/projects/beam_alignment_s1.md` + `CLAUDE/overview.md` updated (scoped exception to the workspace-wide no-hardware rule).
+
 ## 2026-10-28 — Partly visible pin: locate it and compute the move (user request)
 
 When the pin is half cut off (lit-footprint rim) or its top is above / body barely above the footprint, `measure.locate_partial` finds it from the dark object's per-row extents and the cone model

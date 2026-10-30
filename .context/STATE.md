@@ -31,6 +31,7 @@ QA figures: `analysis/geometry_*.png` (regenerate with `python -I scripts/make_g
 
 ## Recent changes
 
+- 2026-10-30: `adaptive-align` (user procedure: rotate until pin leaves the view each side, fit, correct, repeat); hardware gate removed (`--backend epics --camera X` just connects when the user says so). Sim OK; NEXT: run on the real beamline, keep raw frames.
 - 2026-10-28 (evening): post-test overhaul - pin-excluded beam centre, flank validity + one-sided rescue, view state/hints, raw frame saving, `step-pm`/`fast-align` (no calibration), `find-pin`; sim tests `tests/test_detection.py` + `scripted_agent.py` pass. NEXT: re-test on hardware with raw frames, verify wedge rescue on real data (see DECISIONS).
 - 2026-10-28: per-run isolation: all outputs/logs/figures/raw frames go in `runs/<id>/` (see DECISIONS); sim test OK.
 - 2026-10-28: per-camera pixel size (retiga2 1.0, pg5 1.17, gh1 0.69, pg1 1.17) via `set_camera`; aerox confirmed base motor; sim test OK.

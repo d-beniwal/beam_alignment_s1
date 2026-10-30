@@ -260,14 +260,15 @@ def assess_view(m, r, dbg=None, prior=None):
     return {"state": "partial", "hint": hint or None, "why": "; ".join(m["reasons"]) or r.message}
 
 
-def fit_axis(omegas, cols):
-    """x(w) = c + a cos w + b sin w. Returns dict with c, a, b, rms, residuals, rad, phase_deg (their rad*sin(w+st))."""
+def fit_axis(omegas, cols, weights=None):
+    """x(w) = c + a cos w + b sin w (optionally weighted). Returns dict with c, a, b, rms, residuals, rad, phase_deg (their rad*sin(w+st))."""
     om = np.radians(np.asarray(omegas, float))
     x = np.asarray(cols, float)
     if len(x) < 3:
         return {"ok": False, "reason": f"need >=3 valid angles, have {len(x)}"}
     A = np.c_[np.ones_like(om), np.cos(om), np.sin(om)]
-    (c, a, b), *_ = np.linalg.lstsq(A, x, rcond=None)
+    sw = np.sqrt(np.ones_like(x) if weights is None else np.asarray(weights, float))
+    (c, a, b), *_ = np.linalg.lstsq(A * sw[:, None], x * sw, rcond=None)
     res = x - A @ [c, a, b]
     return {"ok": True, "c": float(c), "a": float(a), "b": float(b), "rms": float(np.sqrt(np.mean(res ** 2))),
             "residuals": [float(v) for v in res], "n": int(len(x)),

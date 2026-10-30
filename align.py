@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Entry point for the agent: python align.py <command> ...   (see balign/cli.py). Simulated backend only."""
+"""Entry point for the agent: python align.py <command> ...   (see balign/cli.py). Backends: sim (default) or epics."""
 import sys
 sys.dont_write_bytecode = True   # no __pycache__ dirs outside runs/
 from pathlib import Path

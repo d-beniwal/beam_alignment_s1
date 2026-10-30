@@ -1,13 +1,12 @@
-"""REAL instrument backend (EPICS). *** DISABLED BY DEFAULT and never exercised from this project's development sessions. ***
+"""REAL instrument backend (EPICS): `align.py new-run --backend epics --camera <name>`.
 
-It only constructs when ALL of these hold: environment BALIGN_ENABLE_HARDWARE=1, an explicit camera name from align_config.CAMERAS,
-and pvapy + pyepics importable. Nothing here is run by tests. Safety layers: motor units must read back as mm, per-move soft-limit
-check against .LLM/.HLM, per-step limits are enforced upstream in cli.do_move, readback verification after every move, no writes
-to camera/IOC PVs (acquisition is read-only: it only reads frames from the existing PVA stream).
+Used when the user says they are on the real beamline and want to align on hardware - no extra switch or confirmation. Needs an explicit
+camera name from align_config.CAMERAS and pvapy + pyepics importable. Equipment protection that stays on (not confirmations): motor units
+must read back as mm, per-move soft-limit check against .LLM/.HLM, per-step limits enforced upstream in cli.do_move, rotation limited to
++-MAX_ROT_DEG, readback verification after every move, no writes to camera/IOC PVs (acquisition only reads frames from the existing PVA stream).
 
 Camera must already be acquiring continuously (the IOC is NOT touched); after each motion we discard frames until `settle_frames`
 new unique ids have arrived so the returned frame is taken after the stage stopped."""
-import os
 import time
 import numpy as np
 import align_config as cfg
@@ -17,8 +16,6 @@ class EpicsInstrument:
     name = "epics"
 
     def __init__(self, state=None, camera=None, settle_frames=2):
-        if os.environ.get("BALIGN_ENABLE_HARDWARE") != "1":
-            raise PermissionError("hardware backend disabled: set BALIGN_ENABLE_HARDWARE=1 only after the user has reviewed and approved this backend")
         if camera not in cfg.CAMERAS:
             raise ValueError(f"camera must be one of {sorted(cfg.CAMERAS)}")
         import epics                      # pyepics

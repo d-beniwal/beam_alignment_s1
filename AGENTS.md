@@ -7,10 +7,10 @@ assistant (`../EAA-Pi/`) and driving the Sector 1 Bluesky stack
 (`../mpe_bluesky/`) for device/PV discovery. This directory holds the
 alignment-specific config, skills, workflows, and the curated device/PV list.
 
-**Safety (absolute):** never connect to beamline hardware or EPICS PVs and
-never run code that talks to instruments. Read and edit source only. Any
-tooling written here must default to read-only/simulated until the user
-explicitly says otherwise.
+**Hardware (updated 2026-10-30, user decision):** when the user says they are on the real beamline and want to align on hardware, just connect and run it
+(`align.py new-run --backend epics --camera <gh1|pg1|pg5>`) — do not ask for confirmation again and again. Default is still the simulator when the user
+does not say so (development sessions, tests). Equipment protection stays on and is not a prompt: per-move step limits, motor soft limits, mm units check,
+readback verification, rotation within ±90°.
 
 Distinct codebases — don't conflate: `../mpe_bluesky` (Sectors 1/20),
 `../3idc-bits` (3-ID-C), `../b-pilot` (PyQt GUI for mpe_bluesky).

@@ -1,6 +1,6 @@
 """Command-line tools for the agent. Every command prints one JSON object (stdout) and appends events the GUI shows live.
 The agent decides what to run next; nothing here decides or loops on its own, except the explicit `sweep`/`calibrate` helpers.
-Backend is simulated only (see session.get_backend)."""
+Backends: sim (default) or epics (real beamline, when the user says so; see session.get_backend)."""
 import argparse
 import json
 import sys
@@ -27,6 +27,8 @@ def _out(obj):
 
 # ---- primitives -----------------------------------------------------------------------------------------------------
 def goto_omega(run, deg):
+    if abs(deg) > cfg.MAX_ROT_DEG + 1e-9:
+        raise ValueError(f"omega {deg:+.1f} deg refused: beam alignment never rotates beyond +-{cfg.MAX_ROT_DEG:g} deg")
     before = run.inst.get_omega()
     run.inst.move_omega(deg)
     run.save()
@@ -252,6 +254,147 @@ def do_fast_align(run, verify=True, steps=None):
     return out
 
 
+def _pin_value(m):
+    """(column, weight, kind) of the pin axis in a measurement, or None. Fully usable frames count 1; a partly visible pin whose axis was
+    located from the visible part (cone model) counts 0.3 - it extends the angle range but is less accurate (~5 px)."""
+    if m["pin_col"] is not None:
+        return m["pin_col"], 1.0, "usable"
+    loc = m["view"].get("locate")
+    if m["view"]["state"] == "partial" and loc and loc["rows_cut_frac"] < 0.85:
+        return float(loc["axis_col"]), 0.3, "located"
+    return None
+
+
+def _probe_side(run, sgn, step, jump_first):
+    """Rotate away from 0 on one side until the pin can no longer be measured (the user's 'where does it go out of the field of view').
+    With jump_first (the previous pass reached the limit on both sides) try the +-MAX_ROT_DEG end point straight away.
+    Returns (points[(omega, col, weight, kind)], limit_deg = last angle with any measurement, usable_limit_deg)."""
+    pts, lim, limu = [], 0.0, 0.0
+    top = cfg.MAX_ROT_DEG
+    if jump_first:
+        m = do_measure(run, sgn * top, "adapt")
+        v = _pin_value(m)
+        if v and v[2] == "usable":
+            return [(m["omega"], v[0], v[1], v[2])], top, top
+    th = step
+    while th <= top + 1e-9:
+        m = do_measure(run, sgn * th, "adapt")
+        v = _pin_value(m)
+        if v is None:
+            break
+        pts.append((m["omega"], v[0], v[1], v[2]))
+        lim = th
+        if v[2] == "usable":
+            limu = th
+        th += step
+    return pts, lim, limu
+
+
+def _apply_moves(run, mv, why):
+    out = {}
+    for motor in ("z", "x", cfg.BASE_MOTOR):
+        d = mv.get(motor)
+        if d is None or abs(d) < MIN_MOVE_MM:
+            continue
+        r = move_split(run, motor, d, why)
+        if not r["ok"]:
+            return out, r
+        out[motor] = d
+    return out, {"ok": True}
+
+
+def do_adaptive_align(run, step=15.0, max_passes=6):
+    """Adaptive alignment (user procedure, 2026-10-30). omega -> 0; pin axis to the beam centre (x); then per pass: rotate + until the pin
+    can no longer be measured (note how far its axis moved), rotate - likewise, fit x(w) = c + a cos w + b sin w to every measurement,
+    correct (z <- b, x <- a, aerox <- c-beam), repeat. If a pass reaches +-90 on both sides, later passes just use 0, +90, -90.
+    Never beyond +-MAX_ROT_DEG. Done when |a|,|b| < TOL_AB_PX and |c - beam| < TOL_C_PX."""
+    out = {"ok": False, "passes": []}
+    if abs(run.inst.get_omega()) > 1e-6:
+        goto_omega(run, 0)
+    m = do_measure(run, 0, "adapt0")
+    for _ in range(8):                                      # get the pin properly into view first
+        v = m["view"]
+        if v["state"] == "in_view":
+            break
+        if v["state"] in ("absent", "other_object", "no_beam"):
+            r = do_find_pin(run)
+            if not r.get("found"):
+                out["reason"] = f"pin not found: {r.get('reason')}"; return out
+        elif v.get("hint"):
+            h = v["hint"]
+            for motor, key in (("x", "x_mm"), ("y", "y_mm")):
+                if abs(h.get(key, 0.0)) >= MIN_MOVE_MM:
+                    r = move_split(run, motor, h[key], "adaptive: bring the partly visible pin into view")
+                    if not r["ok"]:
+                        out["reason"] = r["reason"]; return out
+        else:
+            out["reason"] = f"pin at omega=0 is {v['state']} without a usable hint ({v['why']})"; return out
+        m = do_measure(run, 0, "adapt0")
+    if m["view"]["state"] != "in_view":
+        out["reason"] = "could not bring the pin fully into view at omega=0"; return out
+    bcx = (run.state.get("beam_prior") or {}).get("cx", m["beam"]["cx"])
+    dx = bcx - m["pin_col"]                                 # centre the pin axis at omega=0 (moves a only)
+    if abs(cfg.px_to_mm(dx)) >= MIN_MOVE_MM:
+        r = move_split(run, "x", cfg.px_to_mm(dx / cfg.IMAGE_COL_PER_X), "adaptive: centre the pin axis in the field of view at omega=0")
+        if not r["ok"]:
+            out["reason"] = r["reason"]; return out
+    m = do_measure(run, 0, "adapt0")                        # confirms the centring (and teaches the pin width prior)
+    if m["pin_col"] is None:
+        out["reason"] = f"pin lost after centring ({m['view']['state']})"; return out
+    jump, prev, x0 = False, None, m["pin_col"]
+    for k in range(max_passes):
+        pts = [(0.0, x0, 1.0, "usable")]
+        pos, lim_p, limu_p = _probe_side(run, +1, step, jump)
+        neg, lim_n, limu_n = _probe_side(run, -1, step, jump)
+        pts += pos + neg
+        fit = M.fit_axis([p[0] for p in pts], [p[1] for p in pts], [p[2] for p in pts])
+        bcx = (run.state.get("beam_prior") or {}).get("cx", bcx)
+        rec = {"pass": k + 1, "limit_plus_deg": lim_p, "limit_minus_deg": lim_n, "usable_limit_plus_deg": limu_p,
+               "usable_limit_minus_deg": limu_n, "n_points": len(pts), "n_located": sum(p[3] == "located" for p in pts)}
+        if not fit["ok"]:
+            rec["reason"] = fit["reason"]; out["passes"].append(rec)
+            out["reason"] = f"pass {k + 1}: only {len(pts)} measurable angle(s): the pin leaves the view within {step:g} deg; run `find-pin`/centre it first"
+            return out
+        a, b, c = fit["a"], fit["b"], fit["c"]
+        max_ang = max(abs(p[0]) for p in pts)
+        rec.update(a=a, b=b, c=c, rms=fit["rms"], beam_cx=bcx, c_minus_beam_px=c - bcx, max_angle_deg=max_ang)
+        ok_ab = abs(a) < cfg.TOL_AB_PX and abs(b) < cfg.TOL_AB_PX
+        rec["converged"] = bool(ok_ab and max_ang >= 30 and abs(c - bcx) < cfg.TOL_C_PX)
+        run.state["last_fit"] = {"c": c, "a": a, "b": b, "rms": fit["rms"], "beam_cx": bcx, "stale": False}
+        if prev and prev["applied_z"] and abs(b) > max(5.0, 0.5 * abs(prev["b"])) or prev and prev["applied_x"] and abs(a) > max(5.0, 0.5 * abs(prev["a"])):
+            rec["reason"] = "a or b did not shrink after the last correction (sign / backlash problem)"
+            out["passes"].append(rec); out.update(reason=rec["reason"], sign_suspect=True)
+            run.log("warning", rec["reason"], rec); run.save(); return out
+        if rec["converged"]:
+            out["passes"].append(rec); out["ok"] = True
+            run.log("adaptive_pass", f"pass {k + 1}: converged (a={a:+.2f}, b={b:+.2f}, c-beam={c - bcx:+.2f} px, range +{lim_p:g}/-{lim_n:g} deg)", rec)
+            break
+        frac_a = 1.0 if max_ang >= 30 else max(0.25, max_ang / 30)          # small angles determine a poorly: apply only part of it
+        mv, _ = _moves_from_abc(run, a * frac_a, b, c, bcx)
+        if max_ang < 30:
+            mv[cfg.BASE_MOTOR] = None                                      # c needs a: wait for a larger range
+        applied, r = _apply_moves(run, mv, f"adaptive pass {k + 1}")
+        rec.update(applied=applied, a_fraction=frac_a)
+        out["passes"].append(rec)
+        run.log("adaptive_pass", f"pass {k + 1}: range +{lim_p:g}/-{lim_n:g} deg ({len(pts)} pts), a={a:+.2f}, b={b:+.2f}, c-beam={c - bcx:+.1f} px; "
+                f"applied {', '.join(f'{m_} {v:+.4f} mm' for m_, v in applied.items()) or 'nothing'}", rec)
+        if not r["ok"]:
+            out["reason"] = r["reason"]; run.save(); return out
+        prev = {"a": a, "b": b, "applied_z": "z" in applied, "applied_x": "x" in applied}
+        jump = lim_p >= cfg.MAX_ROT_DEG and lim_n >= cfg.MAX_ROT_DEG
+        goto_omega(run, 0)
+        x0 = None
+        m = do_measure(run, 0, "adapt0")
+        if m["pin_col"] is None:
+            out["reason"] = f"pin lost at omega=0 after the correction ({m['view']['state']})"; run.save(); return out
+        x0 = m["pin_col"]
+    else:
+        out["reason"] = f"not converged after {max_passes} passes"
+    out["final"] = out["passes"][-1] if out["passes"] else None
+    run.save()
+    return out
+
+
 def _spiral(nx, ny):
     """Integer offsets (i, j), |i|<=nx, |j|<=ny (start cell excluded): row j=0 first, then j=+-1, ..."""
     pts = [(i, j) for i in range(-nx, nx + 1) for j in range(-ny, ny + 1) if (i, j) != (0, 0)]
@@ -382,6 +525,7 @@ def main(argv=None):
     s = sub.add_parser("step-pm"); s.add_argument("theta", type=float); s.add_argument("--apply", action="store_true", help="also move z, x (and aerox with --base)")
     s.add_argument("--base", action="store_true", help="include the aerox move (axis -> beam centre); sensible for theta >= 60"); s.add_argument("--force", action="store_true")
     s = sub.add_parser("fast-align"); s.add_argument("--no-verify", action="store_true")
+    s = sub.add_parser("adaptive-align"); s.add_argument("--step", type=float, default=15.0); s.add_argument("--max-passes", type=int, default=6)
     s = sub.add_parser("find-pin"); s.add_argument("--max-steps", type=int, default=60); s.add_argument("--no-y", action="store_true")
     sub.add_parser("propose")
     s = sub.add_parser("move"); s.add_argument("motor"); s.add_argument("mm", type=float); s.add_argument("--reason", default="")
@@ -420,6 +564,8 @@ def main(argv=None):
         return _out(res)
     if a.cmd == "step-pm":
         return _out(do_step_pm(run, a.theta, a.apply, a.base, a.force))
+    if a.cmd == "adaptive-align":
+        return _out(do_adaptive_align(run, a.step, a.max_passes))
     if a.cmd == "fast-align":
         return _out(do_fast_align(run, not a.no_verify))
     if a.cmd == "find-pin":

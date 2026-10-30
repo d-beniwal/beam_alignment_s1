@@ -16,11 +16,11 @@ import align_config as cfg
 def get_backend(name, state=None, seed=0, camera=None):
     if name == "sim":
         return SimInstrument(state, seed)
-    if name == "epics":   # gated inside: needs BALIGN_ENABLE_HARDWARE=1 + explicit camera; never used in development sessions
+    if name == "epics":   # real beamline: needs an explicit --camera (pixel size / PVs)
         from .epics_backend import EpicsInstrument
         return EpicsInstrument(state, camera=camera or (state or {}).get("camera"))
     raise NotImplementedError(
-        f"unknown backend '{name}'. Use --backend sim (the 'epics' backend is gated, see balign/epics_backend.py).")
+        f"unknown backend '{name}'. Use --backend sim (simulator) or --backend epics --camera <name> (real beamline).")
 
 
 class Run:

@@ -1,4 +1,4 @@
-"""balign: agent-driven stage-1 beam alignment (rotation axis onto the beam). Simulated backend only until the user enables hardware."""
+"""balign: agent-driven stage-1 beam alignment (rotation axis onto the beam). Simulator (--backend sim) or the real beamline (--backend epics --camera <name>)."""
 import sys
 from pathlib import Path
 

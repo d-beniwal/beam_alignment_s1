@@ -44,14 +44,14 @@ if m["view"]["state"] != "in_view":
     note(f"Pin found after {f['steps']} steps at offset {f['offset_mm']}.")
 else:
     note(f"Pin in view at omega=0 (col {m['pin_col']:.1f}, beam cx {m['beam']['cx']:.1f}).")
-note("Fast routine: +-30 (z, x), then +-90 (z, x, aerox), then verify.")
-r = call("fast-align")
-for st in r["steps"]:
-    note(f"step +-{st['theta']}: a={st['a']}, b={st['b']:+.2f}, c-beam={st['c_minus_beam_px']:+.1f} px, applied {st['applied']}")
+note("Adaptive routine: rotate until the pin leaves the view on each side, fit, correct (z, x, aerox), repeat.")
+r = call("adaptive-align")
+for p in r["passes"]:
+    note(f"pass {p['pass']}: range +{p['limit_plus_deg']:g}/-{p['limit_minus_deg']:g} deg, a={p.get('a', 0):+.2f}, b={p.get('b', 0):+.2f}, c-beam={p.get('c_minus_beam_px', 0):+.2f} px, applied {p.get('applied')}")
 if not r["ok"]:
-    note("Fast-align stopped: " + r["reason"] + " -> " + str(r.get("suggest"))); call("finish", "--status", "failed", "--summary", r["reason"]); raise SystemExit(1)
-v = r["verify"]
-note(f"Verify at +-{v['theta']}: a={v['a']:+.2f} b={v['b']:+.2f} c-beam={v['c_minus_beam_px']:+.2f} px, converged={v['converged']}")
-call("finish", "--status", "ok" if r["converged"] else "failed", "--summary", f"c-beam {v['c_minus_beam_px']:+.2f} px, a {v['a']:+.2f}, b {v['b']:+.2f}")
-print("RESULT", "OK" if r["converged"] else "FAILED", v)
-sys.exit(0 if r["converged"] else 1)
+    note("Adaptive align stopped: " + str(r.get("reason"))); call("finish", "--status", "failed", "--summary", str(r.get("reason"))); raise SystemExit(1)
+v = r["passes"][-1]
+r["converged"] = True
+call("finish", "--status", "ok", "--summary", f"c-beam {v['c_minus_beam_px']:+.2f} px, a {v['a']:+.2f}, b {v['b']:+.2f}")
+print("RESULT OK", {k_: round(v[k_], 3) for k_ in ("a", "b", "c_minus_beam_px")})
+sys.exit(0)

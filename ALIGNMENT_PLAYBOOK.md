@@ -9,10 +9,11 @@ CLI, which logs to `runs/<id>/events.jsonl`; the GUI (`python -I gui.py`, http:/
 frames to `raw/`, figures to `figures/`, logs to `logs/`, reports to `report/`. Never write files to `runs/` itself, `/tmp`, or the repo root; redirect
 any process log to `runs/<id>/logs/<name>.log` (get `<id>` from `new-run`).
 
-## Safety (absolute)
-- Use `--backend sim`. A real `epics` backend exists (`balign/epics_backend.py`) but is gated (needs `BALIGN_ENABLE_HARDWARE=1` + `--camera`) and must only be enabled by the user after review; never set that variable yourself. Never run
-  anything that touches EPICS / the beamline. If asked to "start the alignment" on the real instrument, say it is not enabled yet.
-- Per-step move limits are enforced (`MAX_STEP_PIN_MM`, `MAX_STEP_BASE_MM` in `scripts/align_config.py`); never try to bypass them — split moves.
+## Hardware and safety
+- Default backend is `sim`. When the user says they are on the real beamline and want to align on hardware, start with `new-run --backend epics --camera <gh1|pg1|pg5|...>`
+  (the camera sets the pixel size; ask once only if the user has not said which) and run the alignment — no extra confirmation, no environment switch. Never connect to hardware
+  unless the user says so.
+- Equipment protection stays on (no prompts): per-step move limits (`MAX_STEP_PIN_MM`, `MAX_STEP_BASE_MM`; moves are split), motor soft limits, mm-units check, readback check, rotation within ±`MAX_ROT_DEG` (90°). Never try to bypass them.
 - Pixel size (`PIXEL_UM`) and sign constants live **only** in `scripts/align_config.py`. Never hard-code them.
 - Narrate with `note` before each decision (what you saw, what you will do, why). The user watches the GUI, not your terminal.
 
@@ -24,6 +25,7 @@ any process log to `runs/<id>/logs/<name>.log` (get `<id>` from `new-run`).
 | `goto-omega DEG` / `measure [--omega DEG]` | rotate / acquire + pin + beam measurement (overlay image to the GUI) |
 | `sweep [--angles ...]` | measure at several omegas (default −90…90 step 30) and fit `x(ω)=c+a·cosω+b·sinω`; reports tolerances |
 | `step-pm THETA [--apply] [--base]` | **fast step**: measure 0, ±THETA (one monotonic rotation) → a, b, c; `--apply` moves z (b), x (a, THETA ≥ 30) and with `--base` aerox (c → beam centre) |
+| `adaptive-align [--step 15] [--max-passes 6]` | **the standard run**: ω→0, pin axis to the beam centre, then per pass rotate + until the pin can no longer be measured, rotate − likewise, fit c, a, b to all those points, correct z (b), x (a), aerox (c−beam), repeat; if a pass reaches ±90° on both sides later passes use only 0, +90, −90. Never beyond ±90°. Handles a pin that starts partly visible or absent (`find-pin`) |
 | `fast-align [--no-verify]` | the whole quick routine: `step-pm 30 --apply`, `step-pm 90 --apply --base`, then a verify `step-pm 90` (≈ 3 short rotations, ~1–2 min on hardware) |
 | `find-pin [--max-steps N] [--no-y]` | pin out of view/partly visible: follows the hint or searches x (then y) outward in footprint-sized steps within `SEARCH_RADIUS_*`; returns to the start if not found. **Moves stages** |
 | `estimate-pm THETA` | measure at 0, ±THETA; b = (x₊−x₋)/(2 sin θ); a only for θ ≥ 30 |
@@ -46,13 +48,15 @@ Every measurement has `view.state`: **in_view** (usable), **partial** (pin seen 
 flank + the learned top width were used). Rejected frames carry `reasons`; never use their `pin_col_raw`. The beam centre ignores the pin shadow.
 The pin's top width is learned from the first both-flank frames (so measure ω=0 first, or let `step-pm` do it). Raw frames are in `runs/<id>/raw/*.npz`.
 
-## Procedure (fast; no calibration — signs/scales are confirmed constants)
-1. `new-run --camera <name>` (sets the pixel size); `note` the plan. `measure --omega 0`. If `view.state != in_view` → `find-pin`; if it fails, `finish --status failed` and report.
-2. `fast-align`. It stops with a reason + `suggest` if the pin is not usable at ±θ (e.g. runs into the lit-area edge → try `step-pm 60 --apply --base`, or `find-pin` first).
-   Equivalent manual form: `step-pm 30 --apply` → `step-pm 90 --apply --base` → `step-pm 90` (verify). If |b| fails to shrink after a z move it refuses to move again (sign suspect).
-3. Done when the verify step reports `converged` (|a|,|b| < `TOL_AB_PX`, |c − beam| < `TOL_C_PX`). If not, repeat `step-pm 90 --apply --base` once more; then `finish`.
-4. `finish --status ok --summary "<final a, b, c−beam>"`. On any stop condition, `finish --status failed` with the reason and what you would try next.
-`sweep`/`calibrate`/`propose`/`move` remain for diagnosis (e.g. a suspected sign problem); `calibrate` is **not** part of the normal run. Narrate with `note` before each decision.
+## Procedure (no calibration — signs/scales are confirmed constants)
+1. `new-run` (`--backend epics --camera <name>` on the real beamline, when the user says so; sim otherwise); `note` the plan.
+2. `adaptive-align`. It does, by itself: ω→0 · bring the pin into view (`find-pin` / hint moves) · centre the pin axis on the beam centre (x) · pass 1: rotate +15° steps until the pin cannot
+   be measured, then − likewise (a half-visible pin is located from its visible part and counts with weight 0.3) · fit x(ω)=c+a·cosω+b·sinω to every measurement · correct (z←b; x←a, only a fraction
+   if the range is < 30°; aerox←c−beam only if the range ≥ 30°) · repeat. Done when |a|,|b| < `TOL_AB_PX` and |c−beam| < `TOL_C_PX`. It stops with a reason if a/b fail to shrink after a correction
+   (sign suspect), if the pin leaves the view within one step, or after `--max-passes`.
+3. Result JSON: `passes` (limits ±, n points, a, b, c−beam, applied moves). If `ok` is false read `reason`, narrate it, `finish --status failed`. Otherwise `finish --status ok --summary "<final a, b, c−beam>"`.
+Manual / diagnostic building blocks: `step-pm`, `fast-align` (fixed ±30 then ±90, assumes the pin is measurable there), `sweep`, `calibrate`, `propose`, `move`. `calibrate` is not part of a normal run.
+Narrate with `note` before each decision.
 
 ## Reference run
 `python -I tests/scripted_agent.py` is a scripted agent following exactly this procedure on the simulator (~10 s); `python -I tests/test_detection.py` (sim) `python -I tests/test_identity.py` (real frames in `s1_data/` + painted-in objects) and `python -I tests/test_partial.py` (real frames, pin moved half out of view, closed loop) check the detection logic; useful to see the expected event flow.

@@ -64,7 +64,7 @@ TOL_AB_PX = 1.0            # pin-on-axis tolerance for a, b (px)
 TOL_C_PX = 2.0             # axis-on-beam-centre tolerance (px)
 DEFAULT_SWEEP_DEG = (-90, -60, -30, 0, 30, 60, 90)
 
-# ---- real-instrument wiring (NOT used by the simulator; the epics backend is gated, see balign/epics_backend.py) -----------------
+# ---- real-instrument wiring (used by the epics backend only, see balign/epics_backend.py) -----------------
 # Tomo cameras of the 1-ID-E profile (midas-gui settings.py BUNDLED_PROFILES): PVA image PV = <prefix>Pva1:Image.
 # retiga2 (B hutch) has no PV prefix recorded yet -> the epics backend refuses it until one is added here.
 CAMERAS = {"gh1": "1idGH1:", "pg1": "1idPG1:", "pg5": "1idSP5:"}
@@ -72,4 +72,5 @@ CAMERA_PVA_SUFFIX = "Pva1:Image"
 # Motor records (from mpe_bluesky s1ide_motors.py, see DOMAIN.md). Units must read back as mm (checked before any move).
 MOTOR_PVS = {"omega": "1ide:m9", "x": "1ide1:m34", "y": "1ide1:m35", "z": "1ide1:m36", "aerox": "1ide1:m101"}
 OMEGA_TOL_DEG = 0.05
+MAX_ROT_DEG = 90.0          # beam alignment never rotates beyond +-90 deg (goto_omega refuses)
 MOVE_TIMEOUT_S = 60.0
