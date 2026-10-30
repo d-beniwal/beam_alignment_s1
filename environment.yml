@@ -5,9 +5,9 @@ name: beam-align-s1
 #
 # Versions follow the user's `midas-gui` environment so the two stay interchangeable: numpy is held at 1.26.4 because
 # pvapy 5.4.1 (the last release before the numpy>=2 floor) is paired with it there.
-# Everything the SIMULATED workflow needs is conda-forge; pvapy/pyepics (only used by the gated real backend,
-# balign/epics_backend.py) come from pip, exactly as in midas-gui. Installing them does not enable hardware access:
-# the backend still refuses to start without BALIGN_ENABLE_HARDWARE=1 and an explicit --camera.
+# Everything the SIMULATED workflow needs is conda-forge; pvapy/pyepics (used only by the real-beamline backend,
+# balign/epics_backend.py, i.e. `new-run --backend epics --camera <name>`) come from pip, exactly as in midas-gui.
+# Installing them does not by itself connect to anything.
 
 channels:
   - conda-forge
@@ -30,6 +30,6 @@ dependencies:
 
   - pip
   - pip:
-    # Real-instrument backend only (read-only camera frames over PVA; motor records over CA). NOT needed for --backend sim.
+    # Real-beamline backend only (read-only camera frames over PVA; motor records over CA). NOT needed for the simulator (--backend sim).
     - "pvapy==5.4.1"       # pinned: 5.5.0+ requires numpy>=2.0
     - "pyepics==3.5.10"
