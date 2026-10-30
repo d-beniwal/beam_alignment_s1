@@ -266,6 +266,16 @@ def _pin_value(m):
 
 
 def _probe_side(run, sgn, step, jump_first):
+    """Probe one side; if the pin cannot be measured even at the first step, retry with half the step, then a quarter (15 -> 7.5 -> 3.75 deg).
+    Returns (points, limit_deg, usable_limit_deg, step_used)."""
+    for k, s in enumerate((step, step / 2, step / 4)):
+        pts, lim, limu = _probe_steps(run, sgn, s, jump_first and k == 0)
+        if lim > 0:
+            return pts, lim, limu, s
+    return [], 0.0, 0.0, step / 4
+
+
+def _probe_steps(run, sgn, step, jump_first):
     """Rotate away from 0 on one side until the pin can no longer be measured (the user's 'where does it go out of the field of view').
     With jump_first (the previous pass reached the limit on both sides) try the +-MAX_ROT_DEG end point straight away.
     Returns (points[(omega, col, weight, kind)], limit_deg = last angle with any measurement, usable_limit_deg)."""
@@ -344,24 +354,34 @@ def do_adaptive_align(run, step=15.0, max_passes=6):
     jump, prev, x0 = False, None, m["pin_col"]
     for k in range(max_passes):
         pts = [(0.0, x0, 1.0, "usable")]
-        pos, lim_p, limu_p = _probe_side(run, +1, step, jump)
-        neg, lim_n, limu_n = _probe_side(run, -1, step, jump)
+        pos, lim_p, limu_p, st_p = _probe_side(run, +1, step, jump)
+        neg, lim_n, limu_n, st_n = _probe_side(run, -1, step, jump)
         pts += pos + neg
         fit = M.fit_axis([p[0] for p in pts], [p[1] for p in pts], [p[2] for p in pts])
+        small = False
+        if not fit["ok"] and len(pts) >= 2:      # pin only measurable over a few degrees: b from the farthest point (a-term ~ a*theta^2/2 is negligible), z only
+            om_, col_ = max(pts[1:], key=lambda p: abs(p[0]))[:2]
+            fit = {"ok": True, "a": 0.0, "b": (col_ - x0) / np.sin(np.radians(om_)), "c": float("nan"), "rms": float("nan")}
+            small = True
         bcx = (run.state.get("beam_prior") or {}).get("cx", bcx)
         rec = {"pass": k + 1, "limit_plus_deg": lim_p, "limit_minus_deg": lim_n, "usable_limit_plus_deg": limu_p,
-               "usable_limit_minus_deg": limu_n, "n_points": len(pts), "n_located": sum(p[3] == "located" for p in pts)}
+               "usable_limit_minus_deg": limu_n, "step_plus_deg": st_p, "step_minus_deg": st_n, "n_points": len(pts),
+               "n_located": sum(p[3] == "located" for p in pts), "small_angle_b_only": small}
         if not fit["ok"]:
             rec["reason"] = fit["reason"]; out["passes"].append(rec)
             out["reason"] = f"pass {k + 1}: only {len(pts)} measurable angle(s): the pin leaves the view within {step:g} deg; run `find-pin`/centre it first"
             return out
         a, b, c = fit["a"], fit["b"], fit["c"]
         max_ang = max(abs(p[0]) for p in pts)
-        rec.update(a=a, b=b, c=c, rms=fit["rms"], beam_cx=bcx, c_minus_beam_px=c - bcx, max_angle_deg=max_ang)
+        nn = lambda v: None if v != v else v        # NaN -> None (valid JSON)
+        rec.update(a=nn(a), b=b, c=nn(c), rms=nn(fit["rms"]), beam_cx=bcx, c_minus_beam_px=nn(c - bcx), max_angle_deg=max_ang)
         ok_ab = abs(a) < cfg.TOL_AB_PX and abs(b) < cfg.TOL_AB_PX
-        rec["converged"] = bool(ok_ab and max_ang >= 30 and abs(c - bcx) < cfg.TOL_C_PX)
-        run.state["last_fit"] = {"c": c, "a": a, "b": b, "rms": fit["rms"], "beam_cx": bcx, "stale": False}
-        if prev and prev["applied_z"] and abs(b) > max(5.0, 0.5 * abs(prev["b"])) or prev and prev["applied_x"] and abs(a) > max(5.0, 0.5 * abs(prev["a"])):
+        rec["converged"] = bool(not small and ok_ab and max_ang >= 30 and abs(c - bcx) < cfg.TOL_C_PX)
+        if not small:
+            run.state["last_fit"] = {"c": c, "a": a, "b": b, "rms": fit["rms"], "beam_cx": bcx, "stale": False}
+        # after a correction the residual should be about (1 - fraction applied) of the old value; flag only if it is clearly larger than that
+        if prev and prev["applied_z"] and abs(b) > max(5.0, 0.5 * abs(prev["b"])) or \
+                prev and prev["applied_x"] and abs(a) > max(5.0, abs(prev["a"]) * (1 - prev["frac_a"]) + 0.5 * abs(prev["a"]) * prev["frac_a"]):
             rec["reason"] = "a or b did not shrink after the last correction (sign / backlash problem)"
             out["passes"].append(rec); out.update(reason=rec["reason"], sign_suspect=True)
             run.log("warning", rec["reason"], rec); run.save(); return out
@@ -371,16 +391,18 @@ def do_adaptive_align(run, step=15.0, max_passes=6):
             break
         frac_a = 1.0 if max_ang >= 30 else max(0.25, max_ang / 30)          # small angles determine a poorly: apply only part of it
         mv, _ = _moves_from_abc(run, a * frac_a, b, c, bcx)
-        if max_ang < 30:
+        if max_ang < 30 or small:
             mv[cfg.BASE_MOTOR] = None                                      # c needs a: wait for a larger range
+        if small:
+            mv["x"] = None
         applied, r = _apply_moves(run, mv, f"adaptive pass {k + 1}")
         rec.update(applied=applied, a_fraction=frac_a)
         out["passes"].append(rec)
-        run.log("adaptive_pass", f"pass {k + 1}: range +{lim_p:g}/-{lim_n:g} deg ({len(pts)} pts), a={a:+.2f}, b={b:+.2f}, c-beam={c - bcx:+.1f} px; "
+        run.log("adaptive_pass", f"pass {k + 1}: range +{lim_p:g}/-{lim_n:g} deg ({len(pts)} pts){' [small-angle: b only]' if small else ''}, a={a:+.2f}, b={b:+.2f}, c-beam={c - bcx:+.1f} px; "
                 f"applied {', '.join(f'{m_} {v:+.4f} mm' for m_, v in applied.items()) or 'nothing'}", rec)
         if not r["ok"]:
             out["reason"] = r["reason"]; run.save(); return out
-        prev = {"a": a, "b": b, "applied_z": "z" in applied, "applied_x": "x" in applied}
+        prev = {"a": a, "b": b, "applied_z": "z" in applied, "applied_x": "x" in applied, "frac_a": frac_a}
         jump = lim_p >= cfg.MAX_ROT_DEG and lim_n >= cfg.MAX_ROT_DEG
         goto_omega(run, 0)
         x0 = None

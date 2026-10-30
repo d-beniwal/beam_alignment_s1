@@ -51,9 +51,9 @@ The pin's top width is learned from the first both-flank frames (so measure ω=0
 ## Procedure (no calibration — signs/scales are confirmed constants)
 1. `new-run` (`--backend epics --camera <name>` on the real beamline, when the user says so; sim otherwise); `note` the plan.
 2. `adaptive-align`. It does, by itself: ω→0 · bring the pin into view (`find-pin` / hint moves) · centre the pin axis on the beam centre (x) · pass 1: rotate +15° steps until the pin cannot
-   be measured, then − likewise (a half-visible pin is located from its visible part and counts with weight 0.3) · fit x(ω)=c+a·cosω+b·sinω to every measurement · correct (z←b; x←a, only a fraction
+   be measured (if not even at 15°: retry with 7.5°, then 3.75°), then − likewise (a half-visible pin is located from its visible part and counts with weight 0.3) · fit x(ω)=c+a·cosω+b·sinω to every measurement · correct (z←b; x←a, only a fraction
    if the range is < 30°; aerox←c−beam only if the range ≥ 30°) · repeat. Done when |a|,|b| < `TOL_AB_PX` and |c−beam| < `TOL_C_PX`. It stops with a reason if a/b fail to shrink after a correction
-   (sign suspect), if the pin leaves the view within one step, or after `--max-passes`.
+   (sign suspect; the check allows for only part of a having been applied), if the pin leaves the view within the smallest step (3.75°), or after `--max-passes`. When the pin is measurable over only a few degrees the pass corrects z from b alone (small-angle mode) and the next pass has a larger range.
 3. Result JSON: `passes` (limits ±, n points, a, b, c−beam, applied moves). If `ok` is false read `reason`, narrate it, `finish --status failed`. Otherwise `finish --status ok --summary "<final a, b, c−beam>"`.
 Manual / diagnostic building blocks: `step-pm`, `fast-align` (fixed ±30 then ±90, assumes the pin is measurable there), `sweep`, `calibrate`, `propose`, `move`. `calibrate` is not part of a normal run.
 Narrate with `note` before each decision.

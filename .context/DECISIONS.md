@@ -17,6 +17,12 @@ Hardware: the user found the repeated confirmation / `BALIGN_ENABLE_HARDWARE` ga
 beamline; default stays the simulator. Kept (equipment protection, not prompts): per-step move limits (moves split), soft limits, mm-units check, readback check, +-90 deg rotation. AGENTS.md, playbook and the workspace
 `CLAUDE/projects/beam_alignment_s1.md` + `CLAUDE/overview.md` updated (scoped exception to the workspace-wide no-hardware rule).
 
+## 2026-10-30 — Smaller-step retry in adaptive-align (user request)
+
+If the pin cannot be measured even at the first +-15 deg step, that side is retried with 7.5 then 3.75 deg. If the whole pass has < 3 points (pin measurable over a few degrees only), b comes from the
+farthest point alone (a-term a*theta^2/2 negligible) and only z is moved ("small-angle mode"); the next pass then has a much larger range. Sim: pin leaving the view at 7.5 deg (b=1800 px) and at 3.75 deg
+(b=-3000 px) both converge in 3 passes. Fixed a false sign-suspect: the a/b-shrink guard now accounts for only a fraction of a having been applied. README.md added with the prompt to paste at the beamline.
+
 ## 2026-10-28 — Partly visible pin: locate it and compute the move (user request)
 
 When the pin is half cut off (lit-footprint rim) or its top is above / body barely above the footprint, `measure.locate_partial` finds it from the dark object's per-row extents and the cone model
